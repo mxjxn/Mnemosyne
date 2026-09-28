@@ -1995,21 +1995,25 @@ async function loadSidebar() {
     }
     html += '</ul></div></div>';
 
-    // ── All Pages section (collapsed by default) ──
+    // ── Pages section — browse pointer (flat list retired: 85% ghost refs) ──
     const regularCount = regularPages.length;
+    const realCount = regularPages.filter(p => p['page/file']).length;
+    const ghostCount = regularCount - realCount;
     const journalCount = journals.length;
     const systemCount = systemPages.length;
-    html += `<div class="sb-section collapsed" id="sb-allpages">
-      <div class="sb-header"><span class="sb-chevron">▾</span><span class="sb-label">All pages</span><span class="sb-count">${regularCount}</span></div>
-      <div class="sb-body"><ul class="sb-list">`;
-    for (const p of regularPages) {
-      html += buildPageItem(p['page/title'] || p.title || '');
-    }
-    html += '</ul>';
+    html += `<div class="sb-section" id="sb-browse">
+      <div class="sb-header"><span class="sb-chevron">▾</span><span class="sb-label">Pages</span><span class="sb-count">${realCount}</span></div>
+      <div class="sb-body">
+        <ul class="sb-list">
+          <li class="sb-page-item"><a class="sb-page-link" data-browse="library"><span>browse library</span><span class="tag-count">→</span></a></li>
+        </ul>
+        <div class="sb-empty">${ghostCount} ghost refs omitted — search reaches them</div>
+      </div>
+    </div>`;
 
-    // Journals sub-section inside All Pages
+    // ── Journals section (hoisted from old All Pages) ──
     if (journalCount > 0) {
-      html += `<div class="sb-section sb-subsection collapsed" id="sb-journals">
+      html += `<div class="sb-section collapsed" id="sb-journals">
         <div class="sb-header"><span class="sb-chevron">▾</span><span class="sb-label">Journals</span><span class="sb-count">${journalCount}</span></div>
         <div class="sb-body"><ul class="sb-list">`;
       for (const p of journals) {
@@ -2018,9 +2022,9 @@ async function loadSidebar() {
       html += '</ul></div></div>';
     }
 
-    // System sub-section inside All Pages (cron output, collapsed)
+    // ── System section (cron output, hoisted, collapsed) ──
     if (systemCount > 0) {
-      html += `<div class="sb-section sb-subsection collapsed" id="sb-system">
+      html += `<div class="sb-section collapsed" id="sb-system">
         <div class="sb-header"><span class="sb-chevron">▾</span><span class="sb-label">System</span><span class="sb-count">${systemCount}</span></div>
         <div class="sb-body"><ul class="sb-list">`;
       for (const p of systemPages) {
@@ -2028,8 +2032,6 @@ async function loadSidebar() {
       }
       html += '</ul></div></div>';
     }
-
-    html += '</div></div>';
 
     // ── Tags section ──
     const tags = (tagsData.tags || []).sort((a, b) => b.count - a.count).slice(0, 30);
@@ -2069,23 +2071,19 @@ async function loadSidebar() {
       a.addEventListener('click', () => loadTagPage(a.getAttribute('data-tag')));
     });
 
+    // Wire browse links (library / graph pointers)
+    nav.querySelectorAll('a[data-browse]').forEach(a => {
+      a.addEventListener('click', () => {
+        if (a.getAttribute('data-browse') === 'graph') loadGraphView();
+        else loadLibraryView();
+      });
+    });
+
     // Wire section collapse/expand
     nav.querySelectorAll('.sb-section').forEach(section => {
       const header = section.querySelector(':scope > .sb-header');
       if (header) wireSectionCollapse(header, section);
     });
-
-    // Wire journals sub-section collapse
-    const journalsSection = nav.querySelector('#sb-journals');
-    if (journalsSection) {
-      const jHeader = journalsSection.querySelector(':scope > .sb-header');
-      if (jHeader) {
-        jHeader.addEventListener('click', (e) => {
-          e.stopPropagation();
-          journalsSection.classList.toggle('collapsed');
-        });
-      }
-    }
 
     // Store pages for later reference
     allPages = pages;

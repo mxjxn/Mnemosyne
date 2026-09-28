@@ -1,4 +1,4 @@
-const CACHE = 'notes-shell-v40';
+const CACHE = 'notes-shell-v41';
 const SHELL = [
   '/',
   '/index.html',
