@@ -166,8 +166,15 @@
     const evergreen = data.pages.filter((p) => !dated.has(p.title));
     const totalEntries = series.reduce((n, s) => n + s.entries.length, 0);
 
+    // curated: position attribute wins (ascending), recency breaks ties
+    const posOf = (p) => { const n = parseFloat(p.position); return Number.isFinite(n) ? n : null; };
+    const curated = evergreen
+      .filter((p) => posOf(p) !== null)
+      .sort((a, b) => posOf(a) - posOf(b) || (b.mtime || 0) - (a.mtime || 0));
+    const rest = evergreen.filter((p) => posOf(p) === null);
+
     // hydrate excerpts in parallel; a failed fetch just means no excerpt
-    const posts = await Promise.all(evergreen.map(async (p) => {
+    const hydrated = await Promise.all(evergreen.map(async (p) => {
       let excerpt = "";
       try {
         excerpt = excerptFrom((await api(`/page/${encodeURIComponent(p.title)}`)).blocks);
@@ -175,28 +182,51 @@
       const d = new Date((p.mtime || 0) * 1000);
       return { page: p, excerpt, date: isNaN(d) ? "" : d.toISOString().slice(0, 10) };
     }));
+    const byTitle = new Map(hydrated.map((h) => [h.page.title, h]));
 
-    main.innerHTML = `
-      <div class="landing">
-        <section class="front">
-          <h2 class="sec-h">recent</h2>
-          ${posts.map((p, i) => `
-            <article class="post${i === 0 ? " feat" : ""}">
-              <a class="post-title" href="/p/${encodeURIComponent(p.page.title)}">${esc(p.page.title)}</a>
-              ${p.date ? `<div class="post-date">${p.date}</div>` : ""}
-              ${p.excerpt ? `<p class="post-excerpt">${esc(p.excerpt)}</p>` : ""}
-              <a class="post-more" href="/p/${encodeURIComponent(p.page.title)}">read more →</a>
-            </article>`).join("") || '<div class="empty">nothing yet</div>'}
-        </section>
-        <section class="series-sec">
-          <h2 class="sec-h">series <span class="dim">${totalEntries} reports</span></h2>
-          ${series.map((s) => `
-            <a class="card series" href="/x/${encodeURIComponent(s.name)}">
-              <span class="card-title">${esc(s.name)}</span>
-              <span class="card-meta">${s.entries.length} ${s.entries.length === 1 ? "entry" : "entries"} · latest ${esc(s.entries[0].date)}</span>
-            </a>`).join("") || '<div class="empty">nothing yet</div>'}
-        </section>
-      </div>`;
+    const postHtml = (p, i) => `
+      <article class="post${i === 0 ? " feat" : ""}">
+        <a class="post-title" href="/p/${encodeURIComponent(p.title)}">${esc(p.title)}</a>
+        ${byTitle.get(p.title)?.date ? `<div class="post-date">${byTitle.get(p.title).date}</div>` : ""}
+        ${byTitle.get(p.title)?.excerpt ? `<p class="post-excerpt">${esc(byTitle.get(p.title).excerpt)}</p>` : ""}
+        <a class="post-more" href="/p/${encodeURIComponent(p.title)}">read more →</a>
+      </article>`;
+
+    const seriesHtml = `
+      <section class="series-sec">
+        <h2 class="sec-h">series <span class="dim">${totalEntries} reports</span></h2>
+        ${series.map((s) => `
+          <a class="card series" href="/x/${encodeURIComponent(s.name)}">
+            <span class="card-title">${esc(s.name)}</span>
+            <span class="card-meta">${s.entries.length} ${s.entries.length === 1 ? "entry" : "entries"} · latest ${esc(s.entries[0].date)}</span>
+          </a>`).join("") || '<div class="empty">nothing yet</div>'}
+      </section>`;
+
+    if (curated.length) {
+      main.innerHTML = `
+        <div class="landing two-col">
+          <section class="primary">
+            <h2 class="sec-h">selected</h2>
+            ${curated.map(postHtml).join("")}
+          </section>
+          <aside class="rail">
+            <section class="front">
+              <h2 class="sec-h">recent</h2>
+              ${rest.map(postHtml).join("") || '<div class="empty">nothing new</div>'}
+            </section>
+            ${seriesHtml}
+          </aside>
+        </div>`;
+    } else {
+      main.innerHTML = `
+        <div class="landing">
+          <section class="front">
+            <h2 class="sec-h">recent</h2>
+            ${rest.map(postHtml).join("") || '<div class="empty">nothing yet</div>'}
+          </section>
+          ${seriesHtml}
+        </div>`;
+    }
   }
 
   function linkCard(p) {
