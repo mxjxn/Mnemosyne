@@ -111,3 +111,17 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
 .series-count { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; color: var(--text-faint); margin: -16px 0 22px; }
 .series-list { max-width: 420px; }
 .card.entry .card-title.mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 14px; }
+
+/* front page — editorial post list */
+.front { margin-bottom: 40px; }
+.post { padding: 20px 0 22px; border-bottom: 1px solid var(--border); }
+.post:first-of-type { padding-top: 6px; }
+.post:last-of-type { border-bottom: 0; }
+.post-title { display: inline-block; font-size: 18px; font-weight: 700; letter-spacing: -.01em; color: var(--text); text-decoration: none; line-height: 1.3; }
+.post-title:hover { color: var(--accent); }
+.post-date { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; color: var(--text-faint); margin: 6px 0 10px; }
+.post-excerpt { font-size: 14.5px; color: var(--text-dim); margin-bottom: 12px; max-width: 62ch; }
+.post-more { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; color: var(--accent); text-decoration: none; }
+.post-more:hover { text-decoration: underline; }
+.post.feat .post-title { font-size: 24px; letter-spacing: -.02em; }
+.post.feat .post-excerpt { font-size: 15.5px; color: var(--text); }

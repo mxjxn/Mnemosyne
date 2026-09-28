@@ -105,6 +105,58 @@
     main.innerHTML = `<div class="loading">${esc(msg || "loading…")}</div>`;
   }
 
+  // Document-order block list (same DFS the page view uses).
+  function docOrder(blocks) {
+    const byId = new Map(), kids = new Map();
+    for (const b of blocks) byId.set(b["block/id"], b);
+    for (const b of blocks) {
+      const pid = b["block/parent"] && b["block/parent"]["block/id"];
+      if (pid && pid !== b["block/id"] && byId.has(pid)) {
+        if (!kids.has(pid)) kids.set(pid, []);
+        kids.get(pid).push(b);
+      }
+    }
+    for (const list of kids.values()) list.sort((a, b) => (a["block/order"] || 0) - (b["block/order"] || 0));
+    const roots = blocks
+      .filter((b) => {
+        const pid = b["block/parent"] && b["block/parent"]["block/id"];
+        return !pid || pid === b["block/id"] || !byId.has(pid);
+      })
+      .sort((a, b) => (a["block/order"] || 0) - (b["block/order"] || 0));
+    const ordered = [], seen = new Set();
+    const dfs = (b) => {
+      if (seen.has(b["block/id"])) return;
+      seen.add(b["block/id"]);
+      ordered.push(b);
+      for (const k of kids.get(b["block/id"]) || []) dfs(k);
+    };
+    roots.forEach(dfs);
+    for (const b of blocks) if (!seen.has(b["block/id"])) ordered.push(b);
+    return ordered;
+  }
+
+  // Plain-text excerpt from a page's blocks: skip headings, code, property
+  // lines and images; strip markdown tokens; clamp to ~260 chars.
+  function excerptFrom(blocks) {
+    const parts = [];
+    for (const b of docOrder(blocks)) {
+      const c = String(b["block/content"] || "");
+      if (c.startsWith("```") || c.startsWith("#")) continue;
+      if (/^[\w -]+::/.test(c.trim()) || /^-+$/.test(c.trim())) continue;
+      const t = c
+        .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+        .replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, r, l) => (l || r).trim())
+        .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+        .replace(/[*_~`#]+/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (t) parts.push(t);
+      if (parts.join(" ").length > 300) break;
+    }
+    const e = parts.join(" ");
+    return e.length > 260 ? e.slice(0, 257).replace(/\s+\S*$/, "") + "…" : e;
+  }
+
   async function viewLanding() {
     document.title = "mxjxn / notes";
     setLoading();
@@ -114,11 +166,27 @@
     const evergreen = data.pages.filter((p) => !dated.has(p.title));
     const totalEntries = series.reduce((n, s) => n + s.entries.length, 0);
 
+    // hydrate excerpts in parallel; a failed fetch just means no excerpt
+    const posts = await Promise.all(evergreen.map(async (p) => {
+      let excerpt = "";
+      try {
+        excerpt = excerptFrom((await api(`/page/${encodeURIComponent(p.title)}`)).blocks);
+      } catch (e) { /* leave empty */ }
+      const d = new Date((p.mtime || 0) * 1000);
+      return { page: p, excerpt, date: isNaN(d) ? "" : d.toISOString().slice(0, 10) };
+    }));
+
     main.innerHTML = `
       <div class="landing">
-        <section class="evergreen">
-          <h2 class="sec-h">writing</h2>
-          ${evergreen.map(linkCard).join("") || '<div class="empty">nothing yet</div>'}
+        <section class="front">
+          <h2 class="sec-h">recent</h2>
+          ${posts.map((p, i) => `
+            <article class="post${i === 0 ? " feat" : ""}">
+              <a class="post-title" href="/p/${encodeURIComponent(p.page.title)}">${esc(p.page.title)}</a>
+              ${p.date ? `<div class="post-date">${p.date}</div>` : ""}
+              ${p.excerpt ? `<p class="post-excerpt">${esc(p.excerpt)}</p>` : ""}
+              <a class="post-more" href="/p/${encodeURIComponent(p.page.title)}">read more →</a>
+            </article>`).join("") || '<div class="empty">nothing yet</div>'}
         </section>
         <section class="series-sec">
           <h2 class="sec-h">series <span class="dim">${totalEntries} reports</span></h2>
@@ -192,43 +260,14 @@
     if (!md) { md = document.createElement("meta"); md.name = "description"; document.head.appendChild(md); }
     md.content = String(firstText).slice(0, 155);
 
-    const html = (() => {
-      // Reconstruct document order: logseqd returns blocks grouped by parent,
-      // not in reading order. DFS from roots, children sorted by block/order.
-      const byId = new Map(), kids = new Map();
-      for (const b of data.blocks) byId.set(b["block/id"], b);
-      for (const b of data.blocks) {
-        const pid = b["block/parent"] && b["block/parent"]["block/id"];
-        if (pid && pid !== b["block/id"] && byId.has(pid)) {
-          if (!kids.has(pid)) kids.set(pid, []);
-          kids.get(pid).push(b);
-        }
-      }
-      for (const list of kids.values()) list.sort((a, b) => (a["block/order"] || 0) - (b["block/order"] || 0));
-      const roots = data.blocks
-        .filter((b) => {
-          const pid = b["block/parent"] && b["block/parent"]["block/id"];
-          return !pid || pid === b["block/id"] || !byId.has(pid);
-        })
-        .sort((a, b) => (a["block/order"] || 0) - (b["block/order"] || 0));
-      const ordered = [], seen = new Set();
-      const dfs = (b) => {
-        if (seen.has(b["block/id"])) return;
-        seen.add(b["block/id"]);
-        ordered.push(b);
-        for (const k of kids.get(b["block/id"]) || []) dfs(k);
-      };
-      roots.forEach(dfs);
-      for (const b of data.blocks) if (!seen.has(b["block/id"])) ordered.push(b); // orphans: append
-      return ordered
-        .map((b) => {
-          const level = Math.min(b["block/level"] || 0, 6);
-          const inner = renderBlock(b["block/content"], data.publicRefs);
-          const isHeading = String(b["block/content"] || "").startsWith("#");
-          return `<div class="blk lvl-${level}${isHeading ? " is-heading" : ""}">${inner}</div>`;
-        })
-        .join("");
-    })();
+    const html = docOrder(data.blocks)
+      .map((b) => {
+        const level = Math.min(b["block/level"] || 0, 6);
+        const inner = renderBlock(b["block/content"], data.publicRefs);
+        const isHeading = String(b["block/content"] || "").startsWith("#");
+        return `<div class="blk lvl-${level}${isHeading ? " is-heading" : ""}">${inner}</div>`;
+      })
+      .join("");
     main.innerHTML = `
       <article class="page">
         <a class="back" href="/">← all public notes</a>
