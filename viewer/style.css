@@ -1665,7 +1665,9 @@ hr {
 
 .lib-toolbar {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
   margin: 4px 0 8px;
 }
 
@@ -1846,3 +1848,21 @@ hr {
   .graph-wrap { height: calc(100vh - 260px); }
   .lib-snippet { -webkit-line-clamp: 2; }
 }
+
+/* library — text filter + letter groups */
+.lib-filter {
+  flex: 1 1 160px; min-width: 120px; max-width: 260px;
+  padding: 6px 12px; border: 1px solid var(--border); border-radius: 999px;
+  font-size: 13px; background: var(--bg-alt); color: var(--text); outline: none;
+  transition: border-color .15s, background .15s;
+}
+.lib-filter:focus { border-color: var(--accent-dim); background: var(--bg); }
+.lib-letter {
+  grid-column: 1 / -1;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 13px; font-weight: 600; color: var(--text-dim);
+  margin: 16px 0 6px; padding-bottom: 3px;
+  border-bottom: 1px solid var(--border);
+}
+.lib-letter:first-child { margin-top: 4px; }
+.lib-letter-n { color: var(--text-faint); font-weight: 400; font-size: 11px; margin-left: 6px; }

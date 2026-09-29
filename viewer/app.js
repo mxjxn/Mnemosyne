@@ -2573,6 +2573,7 @@ function scrollToBlock(blockId) {
 let libraryCache = null;
 let libFilterTag = null;
 let libSortMode = 'recent';
+let libFilterText = '';
 
 function libBadTag(t) {
   return !t || /["\\\n]/.test(t) || t.length > 28;
@@ -2608,6 +2609,7 @@ async function loadLibraryView() {
       <div class="page-header"><div class="page-title">Library</div>
         <div class="lib-count">${pages.length} pages</div></div>
       <div class="lib-toolbar">
+        <input id="lib-filter" class="lib-filter" type="search" placeholder="filter titles…" value="${escapeAttr(libFilterText)}" autocomplete="off">
         <div class="lib-sort">
           <button class="sort-pill ${libSortMode === 'recent' ? 'active' : ''}" data-sort="recent">Recent</button>
           <button class="sort-pill ${libSortMode === 'alpha' ? 'active' : ''}" data-sort="alpha">A–Z</button>
@@ -2622,6 +2624,11 @@ async function loadLibraryView() {
       content.querySelectorAll('.sort-pill').forEach(x => x.classList.toggle('active', x === b));
       renderLibGrid((libraryCache.pages || []).filter(p => p.title));
     }));
+    const libFilterInput = document.getElementById('lib-filter');
+    if (libFilterInput) libFilterInput.addEventListener('input', () => {
+      libFilterText = libFilterInput.value.trim();
+      renderLibGrid((libraryCache.pages || []).filter(p => p.title));
+    });
     setActiveSidebarView('library');
   } catch (e) {
     content.innerHTML = `<div class="empty-state"><h2>Couldn't load library</h2><p>${escapeHtml(e.message)}</p></div>`;
@@ -2648,11 +2655,15 @@ function renderLibGrid(pages) {
   if (!grid) return;
   let list = pages;
   if (libFilterTag) list = list.filter(p => (p.tags || []).includes(libFilterTag));
+  if (libFilterText) {
+    const q = libFilterText.toLowerCase();
+    list = list.filter(p => p.title.toLowerCase().includes(q) || (p.snippet || '').toLowerCase().includes(q));
+  }
   list = list.slice().sort((a, b) => {
     if (libSortMode === 'alpha') return a.title.localeCompare(b.title);
     return (b.mtime || 0) - (a.mtime || 0);
   });
-  grid.innerHTML = list.map(p => {
+  const cardHtml = (p) => {
     const tags = (p.tags || []).filter(t => !libBadTag(t)).slice(0, 3)
       .map(t => `<button class="tag-chip" data-tag="${escapeAttr(t)}">${escapeHtml(t)}</button>`).join('');
     const time = p.mtime ? relativeTime(p.mtime) : '';
@@ -2661,7 +2672,24 @@ function renderLibGrid(pages) {
       ${p.snippet ? `<div class="lib-snippet">${escapeHtml(p.snippet)}</div>` : ''}
       <div class="lib-card-meta">${tags ? `<span class="lib-tags">${tags}</span>` : ''}${time ? `<span class="lib-time">${time}</span>` : ''}</div>
     </div>`;
-  }).join('') || '<div class="empty-state">No pages match this filter.</div>';
+  };
+  let inner;
+  if (libSortMode === 'alpha' && list.length) {
+    const groups = new Map();
+    for (const p of list) {
+      const L = (p.title.trim()[0] || '#').toUpperCase();
+      const key = /[A-Z]/.test(L) ? L : '#';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(p);
+    }
+    inner = [...groups.entries()].map(([key, cards]) =>
+      `<div class="lib-letter">${key}<span class="lib-letter-n">${cards.length}</span></div>` +
+      cards.map(cardHtml).join('')
+    ).join('');
+  } else {
+    inner = list.map(cardHtml).join('');
+  }
+  grid.innerHTML = inner || '<div class="empty-state">No pages match this filter.</div>';
   grid.querySelectorAll('.lib-card').forEach(c => c.addEventListener('click', (e) => {
     if (e.target.closest('.tag-chip')) return;
     loadPage(c.dataset.page);
