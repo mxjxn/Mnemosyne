@@ -1,52 +1,43 @@
-# Hermes Logseq Stack
+# hermes-logseq
 
-Template repo for connecting a **Hermes Agent** to a **Logseq knowledge graph** — with a headless API server, auto-reindexing, a web viewer, and ready-made Hermes skills.
+Your Logseq graph — plain markdown files you own — with a private web editor and a public read-only site on top. No build steps, no third-party services, no export step.
 
-## ⚠️ Status: Untested Alpha
+```
+                Logseq graph (plain .md files)
+                              │
+                   ┌──────────▼──────────┐
+                   │       logseqd       │   headless API over the graph
+                   └────┬───────────┬────┘
+          full read/    │           │    read-only,
+          write access  │           │    privacy-filtered
+                        ▼           ▼
+             ┌──────────────┐   ┌────────┐       ┌──────────────┐
+             │   viewer/    │   │ gate/  │  ───► │   reader/    │
+             │ private      │   │ public │       │ public site  │
+             │ editor (PWA) │   │ proxy  │       │ (static JS)  │
+             └──────────────┘   └────────┘       └──────────────┘
+```
 
-This is a direct port from a personal production setup. It works for one person (the maintainer) on one server. **It has not been tested as a reusable template.** Expect rough edges.
+## The four pieces
 
-- The installer (`setup.sh`) is written but untested end-to-end
-- The viewer was extracted from a production deployment — generalizations may have missed something
-- The skills contain opinions from one user's workflow — adapt to your own conventions
-- macOS support is theoretical — the inotify watcher needs real testing on Apple Silicon
-- Documentation describes *how things work*, not *how to set them up from scratch* (that's what the installer is for, once tested)
+**`logseqd/`** — the engine. A Clojure service (runs on Babashka) that indexes your graph into a Datalog database and serves it as a REST API: pages, blocks, search, queries, writes, image uploads. It is the only component that touches your note files. A file watcher reindexes on every change — write from the viewer, an agent, or Logseq desktop, and everything sees the same graph within a second. *(git submodule)*
 
-**Feedback and PRs welcome.**
+**`viewer/`** — the private side. A zero-build vanilla JS PWA: journal timeline, page browsing, block-level editing, library and graph views, image upload. Deploy it behind auth (basic auth is enough) and point it straight at logseqd.
 
-### TODO
+**`gate/`** — the boundary. A read-only proxy that exposes exactly the endpoints the reader needs and nothing else. Pages marked `private:: true` never pass through, and from the outside a private page is indistinguishable from a nonexistent one. Publishing is just a property: `position:: N` pins a page to the reader's front page; removing it unpublishes.
 
-- [ ] Test `setup.sh` end-to-end on a fresh Linux machine
-- [ ] Test `setup.sh` on macOS (Apple Silicon, Homebrew)
-- [ ] Verify macOS inotify-tools (fswatch compatibility) in the inotify watcher
-- [ ] Test skill installation path works with `install-github-skills`
-- [ ] Test viewer deployment with both Caddy and Nginx reverse proxies
-- [ ] Add CI: lint shell scripts (shellcheck), validate skill YAML frontmatter
-- [ ] Strip remaining personal opinions from skills where they're presented as universal rules
-- [ ] Update skill docs when logseqd property-support extension ships (properties will become queryable)
-- [ ] Add a `docker-compose.yml` for people who don't want to run Babashka directly
-- [ ] Document how to add the viewer's push notification endpoints to logseqd
+**`reader/`** — the public side. Static JS, no build step, talks only to the gate. Dated entries collapse into series, articles render blog-style with excerpts, deep links and search work. Your notes become a website because they already are one.
 
-## What You Get
+Live example: **[notes.mxjxn.com](https://notes.mxjxn.com)** — the reader running against a production graph.
 
-- **logseqd** — Headless Clojure Datalog API for your Logseq graph (query pages, blocks, tags)
-- **Notes Viewer** — Zero-build vanilla JS web app for browsing your graph in any browser
-- **Auto-reindexing** — inotify watcher triggers instant reindex on any file change
-- **Git sync** — Optional git watcher for desktop-assisted workflows
-- **Hermes Skills** — Three skills for your agent: core integration, viewer config, cron patterns
-- **Installer** — One `setup.sh` to configure everything
+## Same graph, two doors
 
-## Two Modes
+Write from Logseq desktop, the viewer, or an AI agent — it's all plain markdown, so anything that can write files is a first-class client.
 
-### Headless (Hermes-only)
-Hermes writes markdown → inotify → logseqd → viewer. No Logseq desktop needed.
+- **Headless** (agent-only): agent writes markdown → watcher → logseqd → viewer. No Logseq desktop needed.
+- **Desktop-assisted**: Logseq desktop → git push → git watcher → files → same chain.
 
-### Desktop-Assisted  
-Logseq desktop → git push → git watcher → files → inotify → logseqd → viewer.
-
-Same stack. Different sync story.
-
-## Quick Start
+## Quick start
 
 ```bash
 git clone --recurse-submodules https://github.com/mxjxn/hermes-logseq.git
@@ -54,79 +45,31 @@ cd hermes-logseq
 ./setup.sh
 ```
 
-The installer will ask you:
-- Where your Logseq graph lives
-- Which port to run logseqd on
-- Headless or desktop mode
-- Whether to install the web viewer
+The installer asks where your graph lives, which port to run logseqd on, headless or desktop mode, and whether to deploy the viewer. It handles dependency detection, PM2 setup, watcher configuration, and Hermes skill installation.
 
-It handles dependency detection, PM2 process setup, watcher configuration, and Hermes skill installation.
+**Requirements:** [Babashka](https://babashka.org) · `inotify-tools` (`apt`/`brew`) · PM2 (recommended) · a Logseq graph directory. Any static file server + reverse proxy in front (Caddy configs live in the skills).
 
-## Requirements
+## Hermes skills
 
-- **Babashka** (Clojure runtime) — [install](https://babashka.org)
-- **inotify-tools** — `apt install inotify-tools` (Linux) or `brew install inotify-tools` (macOS)
-- **PM2** (recommended, not required) — `npm install -g pm2`
-- **A Logseq graph** — a directory with `pages/` and `journals/` subdirectories
-
-## Project Structure
-
-```
-hermes-logseq/
-├── logseqd/              # logseqd API server (git submodule)
-├── viewer/               # Notes Viewer web app
-│   ├── index.html
-│   ├── app.js
-│   ├── style.css
-│   ├── sw.js
-│   ├── manifest.json
-│   └── icons/
-├── scripts/
-│   ├── setup.sh          # Interactive installer
-│   ├── inotify-watcher.sh  # Auto-reindex on file changes
-│   └── git-watcher.sh      # Auto-pull from GitHub
-├── skills/
-│   ├── hermes-logseq/       # Core skill — architecture, block format, API
-│   │   ├── SKILL.md
-│   │   ├── references/
-│   │   └── scripts/
-│   ├── hermes-logseq-viewer/  # Viewer deployment and config
-│   │   └── SKILL.md
-│   └── hermes-logseq-cron/     # Cron patterns for check-ins and publishing
-│       └── SKILL.md
-└── README.md
-```
-
-## Skills
-
-Three focused Hermes skills, each independently useful:
+Three focused skills for [Hermes Agent](https://hermes-agent.nousresearch.com), each independently useful:
 
 | Skill | Purpose |
 |-------|---------|
-| `hermes-logseq` | Core integration — architecture, block format rules, API reference, file organization |
+| `hermes-logseq` | Core integration — architecture, block format rules, API reference |
 | `hermes-logseq-viewer` | Viewer deployment — reverse proxy setup, customization, PWA config |
-| `hermes-logseq-cron` | Cron patterns — check-ins, research pipelines, publishing, read-back workflows |
+| `hermes-logseq-cron` | Cron patterns — check-ins, research pipelines, publishing workflows |
 
-Enable in your Hermes config:
-```yaml
-enabled_skillsets:
-  - hermes-logseq
-  - hermes-logseq-viewer
-  - hermes-logseq-cron
-```
+## Status
 
-## What is logseqd?
+⚠️ Untested as a template. It runs one person's production notes stack; the installer has not been exercised on a fresh machine. Expect rough edges — feedback and PRs welcome.
 
-A lightweight headless server that reads your Logseq graph files into a Datalog database (DataScript) and exposes them via a REST API. Written in Clojure, runs on Babashka.
+<details>
+<summary>Maintainer TODOs</summary>
 
-Key endpoints: `/pages`, `/page/:title`, `/search`, `/query` (Datalog), `/reindex-file`, `/append`.
-
-See the [logseqd repo](https://github.com/mxjxn/logseqd) for full API docs and implementation details.
-
-## What is the Viewer?
-
-A single-page web app with no build step, no framework, no npm dependencies. Serves your Logseq graph to any browser with full block tree rendering, search, journal view, tag browsing, and a compose bar for appending blocks.
-
-## License
-
-MIT
+- [ ] Test `setup.sh` end-to-end on fresh Linux + macOS
+- [ ] Verify macOS watcher compatibility
+- [ ] Test viewer deployment behind Nginx (Caddy tested)
+- [ ] Add CI: shellcheck + skill frontmatter validation
+- [ ] `docker-compose.yml` for non-Babashka users
+- [ ] Update skill docs when queryable property support ships in logseqd
+</details>
