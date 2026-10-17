@@ -60,18 +60,29 @@ function mtimeForTitle(title) {
 // before the first bullet). File-based on purpose: logseqd's index doesn't
 // retract removed properties, and this needs to reflect removals instantly.
 // Only `position` is ever exposed — other properties stay behind the gate.
-function positionForTitle(title) {
+function propForTitle(title, key) {
   try {
     const safe = title.replace(/\//g, "___");
     const p = `/root/mxjxn-logseq-notes/pages/${safe}.md`;
     const head = fs.readFileSync(p, "utf8").slice(0, 2048);
     const zone = head.split(/\n(?=\t?- )/)[0];
-    const m = zone.match(/^position::?\s*(.+)$/m); // Logseq `position::` or YAML `position:`
+    const re = new RegExp("^" + key + "::?\\s*(.+)$", "m"); // Logseq `key::` or YAML `key:`
+    const m = zone.match(re);
     const v = m && m[1].trim().replace(/^["']|["']$/g, "");
     return v || null;
   } catch {
     return null;
   }
+}
+
+function positionForTitle(title) {
+  return propForTitle(title, "position");
+}
+
+// `article:: true` opts a public page into mxjxn.com's recent-articles
+// section specifically — the reader (notes.mxjxn.com) ignores it.
+function articleForTitle(title) {
+  return propForTitle(title, "article") === "true";
 }
 
 const REF_RE = /\[\[([^\]\|]+)(?:\|[^\]]*)?\]\]/g;
@@ -90,7 +101,12 @@ async function handlePages() {
   const wl = await fetchWhitelist();
   const pages = [...wl].map((title) => {
     const position = positionForTitle(title);
-    return { title, mtime: mtimeForTitle(title), ...(position ? { position } : {}) };
+    return {
+      title,
+      mtime: mtimeForTitle(title),
+      ...(position ? { position } : {}),
+      ...(articleForTitle(title) ? { article: true } : {}),
+    };
   });
   pages.sort((a, b) => (b.mtime || 0) - (a.mtime || 0));
   return { count: pages.length, pages };
