@@ -2,7 +2,7 @@
 visibility: public
 name: hermes-logseq
 description: Hermes Agent + Logseq knowledge graph integration — architecture, block format, sync, and wiring guide.
-version: 1.0.0
+version: 1.1.0
 metadata:
   hermes:
     tags: [logseq, knowledge-graph, hermes, notes]
@@ -57,10 +57,12 @@ Human edits in Logseq desktop, pushes via git plugin. Server-side git watcher pu
 ```bash
 git clone --recurse-submodules https://github.com/mxjxn/hermes-logseq.git
 cd hermes-logseq
-./setup.sh
 ```
 
-The installer handles: dependency detection, logseqd configuration, PM2 process registration, inotify/git watcher setup, viewer deployment, and Hermes skill installation.
+Use the repository's [manual deployment guide](https://github.com/mxjxn/hermes-logseq/blob/main/docs/deployment.md)
+for the current Clojure entry point and reverse-proxy setup. `setup.sh` is a
+legacy installer whose launch/copy paths do not match the current tree.
+The included watcher uses Linux `inotifywait`; native macOS watching is not implemented.
 
 ## Logseq Block Format
 
@@ -101,7 +103,7 @@ Tags create navigable pages. Use sparingly — every `#tag` becomes a page someo
   another-prop:: value
 ```
 
-Properties cascade to all child blocks. They're 2-space indented, no dash.
+Properties belong to the preceding block and have no bullet marker. The parser returns them in a `properties` map; it does not implement inherited property queries.
 
 ## logseqd API Reference
 
@@ -110,7 +112,7 @@ The API runs on a configurable port (default: 8471). All responses are JSON.
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/pages` | GET | List all pages |
-| `/page/:title` | GET | Get page by title (blocks as tree) |
+| `/page/:title` | GET | Get page blocks with parent references |
 | `/search?q=query` | GET | Full-text search across blocks |
 | `/query` | POST | Datalog query (EDN body) |
 | `/reindex` | POST | Full graph reindex |
@@ -118,8 +120,14 @@ The API runs on a configurable port (default: 8471). All responses are JSON.
 | `/append` | POST | Append block to page |
 | `/insert-block` | POST | Insert block after specific block |
 | `/change-block-level` | POST | Indent/outdent a block |
+| `/update-block` | POST | Replace block content |
+| `/delete-block` | POST | Delete a block, optionally inheriting its children |
+| `/property?key=type&value=job` | GET | Query properties; add `scope=page` for page properties |
 
-**Note:** logseqd drops block properties from stored content. Only `title::` (parsed as page title) and tags are reliably queryable. Use tags as discriminators instead of properties for server-side queries.
+Properties are parsed separately from block content and are queryable through
+`/property` and Datalog attributes such as `:prop/type`. They appear under
+`properties` in API responses. `/search` excludes journals, date/system-page
+patterns, and pages with `private:: true`; use page reads or Datalog when needed.
 
 ## File Organization
 

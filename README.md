@@ -1,86 +1,179 @@
-# hermes-logseq
+# A shared notes workspace
 
-Your Logseq graph — plain markdown files you own — with a private web editor and a public read-only site on top. No build steps, no third-party services, no export step.
+**Capture, connect, discuss, and publish—with your agent.**
 
+Capture a thought on your phone, develop it in a conversation, keep the result
+in your knowledge graph, and publish selected pages. Your notes live in ordinary
+Markdown files using Logseq's block, page-reference, and journal conventions.
+
+The project brings together a private web editor, a public reader, a queryable
+graph API, and a Hermes Desktop plugin. It is an independent community project.
+The web editor works without either desktop application installed.
+
+[Desktop plugin](docs/hermes-desktop.md) · [Run the web stack](docs/deployment.md) · [Development checks](tests/README.md) · [MIT license](LICENSE)
+
+## The workflow
+
+1. **Capture.** Open your journal and start writing. Expand the composer for a
+   longer entry; the same draft stays with you.
+2. **Connect.** Organize thoughts into blocks and sub-blocks, link pages with
+   `[[references]]`, and explore your notes through the library and graph views.
+3. **Discuss.** In Hermes Desktop, keep a note beside a conversation and add a
+   selected block to the chat draft. Review it before sending.
+4. **Keep.** Your agent can read and write the same graph through files or the
+   API. Research, journal entries, and scheduled reports become durable notes.
+5. **Publish.** Mark a page public to make it available through the read-only
+   reader. The private editor and public site use separate API surfaces.
+
+## What is available
+
+| Interface | What it does | Current status |
+|---|---|---|
+| **Private web editor** | Journals, expandable capture, block editing, page references, search, library, and graph browsing | Used in the maintainer's deployment; actively improving |
+| **Hermes Desktop plugin** | Notes workspace and side pane, journal capture, page browsing/search, block editing, and discussion drafts | Implemented and tested with an SDK browser harness and real backend; native Desktop/VPS acceptance remains |
+| **Public reader** | Read-only pages, search, curated ordering, and dated series | Used in the maintainer's deployment; deployment still contains personal configuration |
+| **Graph API — logseqd** | Read/write operations, incremental indexing, properties, and Datalog queries | Included as a pinned submodule |
+| **Agent skills** | Graph conventions, publishing helpers, deployment notes, and scheduled workflow examples | Adapt to your graph and installed agent version |
+
+The web interfaces are plain HTML, CSS, and JavaScript with no frontend build
+step. The Desktop plugin uses Hermes's React and plugin SDK. Development tests
+have their own dependencies.
+
+Example public reader: [notes.mxjxn.com](https://notes.mxjxn.com).
+
+## How the pieces fit
+
+```mermaid
+flowchart LR
+    Browser["Phone / browser"] --> Editor["Private web editor"]
+    Editor --> API["logseqd API"]
+    Desktop["Hermes Desktop Notes"] --> Gateway["Authenticated Hermes gateway"]
+    Gateway --> API
+    Agent["Hermes Agent"] --> Files["Markdown graph"]
+    Files -->|"index / reindex"| API
+    API -->|"write"| Files
+    API --> Gate["Public read-only gate"]
+    Gate --> Reader["Public reader"]
 ```
-                Logseq graph (plain .md files)
-                              │
-                   ┌──────────▼──────────┐
-                   │       logseqd       │   headless API over the graph
-                   └────┬───────────┬────┘
-          full read/    │           │    read-only,
-          write access  │           │    privacy-filtered
-                        ▼           ▼
-             ┌──────────────┐   ┌────────┐       ┌──────────────┐
-             │   viewer/    │   │ gate/  │  ───► │   reader/    │
-             │ private      │   │ public │       │ public site  │
-             │ editor (PWA) │   │ proxy  │       │ (static JS)  │
-             └──────────────┘   └────────┘       └──────────────┘
-```
 
-## The four pieces
+Your server holds the main graph in the current workflow. Browser edits,
+Desktop edits, Telegram conversations, and scheduled agent work can all use that
+same graph. Logseq Desktop is optional; it is not required for this workflow.
 
-**`logseqd/`** — the engine. A Clojure service (runs on Babashka) that indexes your graph into a Datalog database and serves it as a REST API: pages, blocks, search, queries, writes, image uploads. It is the only component that touches your note files. A file watcher reindexes on every change — write from the viewer, an agent, or Logseq desktop, and everything sees the same graph within a second. *(git submodule)*
+**Git history is a separate layer.** The maintainer's deployment automates commits
+and pushes. This repository includes a watcher that pulls remote changes, but
+it does not provide a complete automatic commit/push service for every install.
 
-**`viewer/`** — the private side. A zero-build vanilla JS PWA: journal timeline, page browsing, block-level editing, library and graph views, image upload. Deploy it behind auth (basic auth is enough) and point it straight at logseqd.
+## Get started
 
-**`gate/`** — the boundary. A read-only proxy that exposes exactly the endpoints the reader needs and nothing else. Pages marked `private:: true` never pass through, and from the outside a private page is indistinguishable from a nonexistent one. Publishing is just a property: `position:: N` pins a page to the reader's front page; removing it unpublishes.
+Clone the repository with its pinned backend:
 
-**`reader/`** — the public side. Static JS, no build step, talks only to the gate. Dated entries collapse into series, articles render blog-style with excerpts, deep links and search work. Your notes become a website because they already are one.
-
-Live example: **[notes.mxjxn.com](https://notes.mxjxn.com)** — the reader running against a production graph.
-
-## Same graph, two doors
-
-Write from Logseq desktop, the viewer, or an AI agent — it's all plain markdown, so anything that can write files is a first-class client.
-
-- **Headless** (agent-only): agent writes markdown → watcher → logseqd → viewer. No Logseq desktop needed.
-- **Desktop-assisted**: Logseq desktop → git push → git watcher → files → same chain.
-
-## Quick start
-
-```bash
+```sh
 git clone --recurse-submodules https://github.com/mxjxn/hermes-logseq.git
 cd hermes-logseq
-./setup.sh
 ```
 
-The installer asks where your graph lives, which port to run logseqd on, headless or desktop mode, and whether to deploy the viewer. It handles dependency detection, PM2 setup, watcher configuration, and Hermes skill installation.
+Choose the part you want to use:
 
-**Requirements:** [Babashka](https://babashka.org) · `inotify-tools` (`apt`/`brew`) · PM2 (recommended) · a Logseq graph directory. Any static file server + reverse proxy in front (Caddy configs live in the skills).
+- **Already running a graph on a server?** Follow the [Hermes Desktop guide](docs/hermes-desktop.md)
+  to add the Notes workspace and companion pane. Install the backend on the
+  server and the Desktop half on your computer.
+- **Setting up the web editor or public reader?** Use the [manual deployment guide](docs/deployment.md).
+  It covers the Clojure backend, `/api` routing, file watching, and publishing.
+- **Developing the integration?** Start with the [test guide](tests/README.md).
 
-## Hermes Desktop plugin
+`setup.sh` is a legacy installer and is **not the recommended setup path**. Its
+backend launch command and some copied paths do not match the current tree.
+The manual guide uses the checked-in Clojure entry point.
 
-Open your server graph inside Hermes Desktop: a Notes workspace, a companion
-pane beside chat, journal capture, block editing, and **Discuss with Hermes**.
-The plugin connects through your selected gateway and keeps using your existing
-server graph and GitHub sync.
+## Files and compatibility
 
-See [installation and usage](docs/hermes-desktop.md). The Desktop frontend and
-VPS backend must both be installed/enabled. Block editing requires the pinned
-logseqd revision included here.
+A graph is a directory containing `pages/` and `journals/`:
 
-## Hermes skills
+```text
+my-graph/
+├── pages/
+│   └── Project Notes.md
+└── journals/
+    └── 2026_10_27.md
+```
 
-Three focused skills for [Hermes Agent](https://hermes-agent.nousresearch.com), each independently useful:
+A page uses Logseq-style properties and tab-indented blocks:
 
-| Skill | Purpose |
-|-------|---------|
-| `hermes-logseq` | Core integration — architecture, block format rules, API reference |
-| `hermes-logseq-viewer` | Viewer deployment — reverse proxy setup, customization, PWA config |
-| `hermes-logseq-cron` | Cron patterns — check-ins, research pipelines, publishing workflows |
+```markdown
+title:: Project Notes
+- An idea worth keeping
+	- A supporting detail
+- A connection to [[Another Page]]
+```
 
-## Status
+`logseqd` runs on the JVM using Clojure CLI, DataScript, and Ring/Jetty. The
+repository's current backend does not include a Babashka launcher. Its parser
+supports the file conventions used here; it does not implement every Logseq
+feature or the separate Logseq database format.
 
-⚠️ Untested as a template. It runs one person's production notes stack; the installer has not been exercised on a fresh machine. Expect rough edges — feedback and PRs welcome.
+Properties are queryable through `/property` and Datalog. Search currently
+excludes journals, several date/system-page patterns, and pages marked
+`private:: true`; it should not be described as a search of every block.
 
-<details>
-<summary>Maintainer TODOs</summary>
+## Publishing rules
 
-- [ ] Test `setup.sh` end-to-end on fresh Linux + macOS
-- [ ] Verify macOS watcher compatibility
-- [ ] Test viewer deployment behind Nginx (Caddy tested)
-- [ ] Add CI: shellcheck + skill frontmatter validation
-- [ ] `docker-compose.yml` for non-Babashka users
-- [ ] Update skill docs when queryable property support ships in logseqd
-</details>
+The checked-in public gate exposes a page when either page property is present:
+
+```markdown
+public:: true
+```
+
+or:
+
+```markdown
+visibility:: public
+```
+
+Publication applies to the **whole page**, including its blocks. `position:: N`
+controls curated ordering after publication; adding or removing `position` does
+not publish or unpublish a page. `private:: true` is not an override for the
+public gate's allowlist.
+
+To unpublish, remove both public markers if present, reindex the file, and allow
+the gate's 15-second allowlist cache to expire. See [public reader setup](docs/deployment.md#public-reader)
+for routing, graph-path configuration, and a verification example. The reader
+renders external HTTPS images; it does not expose the graph's local asset folder.
+
+## Repository map
+
+| Path | Role |
+|---|---|
+| [`viewer/`](viewer/) | Private browser editor and PWA |
+| [`reader/`](reader/) | Public read-only frontend |
+| [`gate/gate.mjs`](gate/gate.mjs) | Public page allowlist and read-only API |
+| [`logseqd/`](logseqd/) | Pinned graph API submodule |
+| [`desktop/plugin.js`](desktop/plugin.js) | Native Hermes Desktop interface |
+| [`dashboard/plugin_api.py`](dashboard/plugin_api.py) | Authenticated gateway bridge to logseqd |
+| [`skills/`](skills/) | Agent integration and workflow examples |
+| [`scripts/`](scripts/) | File reindexing and optional Git-pull watchers |
+| [`docs/`](docs/) | Desktop and web deployment guides |
+| [`tests/`](tests/) | Plugin checks and integration tests |
+
+## Project status and contributions
+
+This is a production-derived alpha, built around one person's daily workflow.
+The web stack is in use; a clean installation on a new machine is not yet
+validated end to end. Linux is the reference server environment. The included
+watcher uses Linux `inotifywait`; a native macOS watcher is not implemented.
+
+The Desktop plugin has automated checks, but those do not replace acceptance in
+a real native Desktop/VPS session. Local graph replication and conflict-safe
+multi-device file sync are outside the current implementation. Web capture has
+local draft/queue support and some cached reads; this is not a fully offline
+notes system.
+
+Useful contributions include reproducible installation reports, writing and
+navigation improvements, publishing checks, and watcher portability. For an
+issue, include the interface you used, the relevant version or commit, and the
+steps that reproduce the behavior. Use a disposable graph for write tests.
+
+## License
+
+This repository's code and documentation are available under the [MIT license](LICENSE).
+The separately maintained `logseqd` submodule retains its [CC0 license](logseqd/LICENSE).

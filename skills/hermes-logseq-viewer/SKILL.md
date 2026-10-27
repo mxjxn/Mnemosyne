@@ -1,133 +1,107 @@
 ---
 visibility: public
 name: hermes-logseq-viewer
-description: Deploy and configure the Notes Viewer — a static web UI for browsing a Logseq graph via the logseqd API.
-version: 1.0.0
+description: Deploy and configure the private web editor for a Logseq graph via logseqd.
+version: 1.1.0
 metadata:
   hermes:
     tags: [logseq, viewer, web, knowledge-graph]
 ---
 
-# Hermes Logseq — Notes Viewer
+# Private web editor
 
-A zero-build, vanilla JS web app that serves your Logseq knowledge graph to any browser. Reads from the logseqd API — no desktop app required.
+The files in `viewer/` implement a private, zero-build web editor for the graph.
+The current deployment reference is the repository's
+[manual web-stack guide](https://github.com/mxjxn/hermes-logseq/blob/main/docs/deployment.md).
 
-## What It Does
+## Current capabilities
 
-- Browse all pages with full block tree rendering
-- Search across the entire graph
-- Journal view with daily entries
-- Tag browsing
-- Page references and `[[]]` links
-- Compose bar for adding blocks
-- Mobile-responsive
-- PWA-capable (offline, installable)
-- Push notifications for changes
+- Journal timeline, expandable journal composer, and full writing mode
+- Local drafts and an offline capture queue
+- Page browsing, search, tags, and `[[page references]]`
+- Edit, delete, indent/outdent, New block, and New sub-block actions
+- Library and graph views
+- Structured Note/Event/Ask composition and slash templates
+- Installable PWA and capture/share shortcuts
 
-## What It Doesn't Do
-
-- No inline editing (compose bar is append-only)
-- No `[[]]` link navigation in edit mode
-- No `{{query}}` rendering (desktop-only feature)
-- No canvas / whiteboard views
-
-## Files
-
-```
-viewer/
-├── index.html      # Main HTML shell
-├── app.js          # All application logic (~82KB, single file)
-├── style.css       # Styles (~32KB)
-├── sw.js           # Service worker for PWA
-├── manifest.json   # PWA manifest
-└── icons/          # App icons (touch, favicon, 192px, 512px)
-```
-
-No build step. No framework. No npm. Just static files.
+Search uses logseqd's `/search`, which excludes journals, date/system-page
+patterns, and pages marked `private:: true`. Do not promise whole-graph search.
+Push-notification UI is present but requires the corresponding backend and
+browser setup. Cached reads and capture queues are not complete offline sync.
+The viewer does not implement Logseq query rendering, canvas, or the separate
+Logseq database format. There is no image-upload control in the current viewer;
+backend upload endpoints are a separate capability.
 
 ## Deployment
 
-### 1. Copy Files
+Serve `viewer/` as static files behind HTTPS and authentication. The frontend
+uses `/api`; strip that prefix before forwarding to logseqd.
 
-```bash
-cp -r viewer/* /var/www/notes-viewer/
-```
+Example Caddy site (replace the domain, path, username, and hash):
 
-Or wherever your web server serves static files.
-
-### 2. Configure Reverse Proxy
-
-The viewer expects logseqd at `/api`. You need a reverse proxy:
-
-**Caddy:**
-```
-notes.example.com {
-  root * /var/www/notes-viewer
-  file_server
-  reverse_proxy /api/* localhost:8471
+```caddyfile
+edit.example.com {
+    basic_auth {
+        your-user REPLACE_WITH_A_CADDY_PASSWORD_HASH
+    }
+    handle_path /api/* {
+        reverse_proxy 127.0.0.1:8471
+    }
+    handle {
+        root * /absolute/path/to/hermes-logseq/viewer
+        file_server
+    }
 }
 ```
 
-**Nginx:**
+Generate the hash with `caddy hash-password`. Protect the API as well as the
+static frontend. Caddy's `handle_path` removes `/api`; a plain path-matched
+`reverse_proxy` does not.
+
+For Nginx, use a trailing slash in the upstream URL:
+
 ```nginx
-server {
-  listen 443 ssl;
-  server_name notes.example.com;
-
-  location /api/ {
-    proxy_pass http://localhost:8471;
-    proxy_set_header Host $host;
-  }
-
-  location / {
-    root /var/www/notes-viewer;
-    try_files $uri $uri/ /index.html;
-  }
+location /api/ {
+    proxy_pass http://127.0.0.1:8471/;
 }
 ```
 
-**macOS local dev (no reverse proxy):**
-Edit `app.js` line 2 to point directly:
-```js
-const API = 'http://localhost:8471';
+Configure the private site's TLS, authentication, and static serving separately.
+
+The current backend runs with Clojure CLI from the `logseqd/` directory:
+
+```sh
+clojure -M:run /absolute/path/to/graph 8471
 ```
 
-### 3. Deploy / Update
+The repository has no current Babashka launcher. The Linux watcher in
+`scripts/inotify-watcher.sh` handles direct file edits; API writes reindex their
+own files. Native macOS watching needs a separate implementation.
 
-When editing viewer files, bump the version:
-- `index.html`: update `<meta name="version">` and `?v=` on CSS link
-- `sw.js`: bump the cache version string
+## Customization and updates
 
-Changes go live immediately (no rebuild).
+- Site title and footer link: `viewer/index.html`
+- Theme: CSS variables in `viewer/style.css`
+- Fonts: Inter and JetBrains Mono, loaded from Google Fonts
+- API prefix: the `API` constant in `viewer/app.js`
+- Installed-app name, icons, shortcuts, and sharing: `viewer/manifest.json`
 
-## Configuration
+For a frontend update, keep the HTML asset query versions and service-worker
+cache version in sync. Deploy the files together. Existing drafts stay in the
+browser; saving sends them to the server.
 
-### Default Page
+The normal landing page is the journal timeline. Compose actions and manual
+navigation refresh the relevant content; do not describe the web viewer as a
+live subscription to all graph changes.
 
-On first visit (no hash), the viewer loads today's journal. This is hardcoded in `app.js` — search for `hash routing` to change the default landing page.
+## Public reader and Desktop
 
-### Search
+The private editor is separate from `reader/`. The public reader talks to
+`gate/gate.mjs`, whose allowlist uses `public:: true` or `visibility:: public`.
+`position:: N` controls ordering, not access. Do not expose the raw logseqd API
+as the public reader's backend. The gate still contains maintainer-specific
+filesystem paths that need adaptation for another graph.
 
-Full-text search via logseqd's `/search` endpoint. Searches block content and tags.
-
-### Compose Bar
-
-Append-only. Blocks are added as children of the current page's root level. For journals, they append to the day block.
-
-### Push Notifications
-
-The viewer supports web push notifications via `/api/push/subscribe` and `/api/push/unsubscribe` endpoints. Requires logseqd to implement these — currently a TODO in most setups.
-
-## Customization
-
-- **Site title:** Edit `<h1 id="site-title">` in `index.html`
-- **Theme:** Edit CSS variables in `style.css` (search for `:root`)
-- **Fonts:** Currently uses Inter + JetBrains Mono (loaded from Google Fonts)
-- **GitHub link:** Change in `index.html` footer
-
-## Limitations
-
-- No real-time updates — manual refresh or the compose bar triggers changes
-- inotify handles auto-reindex on the server side; the viewer polls on user action
-- Block deletion and editing require direct file manipulation + reindex
-- No user authentication — the viewer is public by default. Use your web server's auth if needed.
+For the native Notes workspace and companion pane, use the
+[Hermes Desktop guide](https://github.com/mxjxn/hermes-logseq/blob/main/docs/hermes-desktop.md).
+It has its own backend/frontend enablement and supported features.
