@@ -1,0 +1,6 @@
+{
+  "private": true,
+  "description": "Development-only browser harness; production plugin has no build step",
+  "scripts": {"test": "node desktop-smoke.cjs"},
+  "devDependencies": {"esbuild": "^0.25.0", "playwright": "^1.62.0", "react": "^19.0.0", "react-dom": "^19.0.0"}
+}

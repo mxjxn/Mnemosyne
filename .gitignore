@@ -13,3 +13,8 @@ Thumbs.db
 
 # Env
 .env
+
+# Plugin development
+__pycache__/
+*.pyc
+node_modules/
