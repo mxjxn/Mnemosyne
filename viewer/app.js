@@ -31,7 +31,9 @@ async function apiPost(path, body) {
     body: body,
   });
   if (!resp.ok) throw new Error(`API ${resp.status}`);
-  return resp.json();
+  const result = await resp.json();
+  if (result.error) throw new Error(result.error);
+  return result;
 }
 
 // ─── Markdown-ish rendering ──────────────────────────────────
@@ -290,10 +292,11 @@ function renderBlocks(blocks, overridePageTitle) {
 
   // Build parent → children map
   const childMap = {};
+  const blockIds = new Set(blocks.map(b => b['block/id']));
   const topBlocks = [];
   for (const b of blocks) {
     const parentId = b['block/parent']?.['block/id'];
-    if (parentId && parentId !== b['block/id']) {
+    if (parentId && parentId !== b['block/id'] && blockIds.has(parentId)) {
       if (!childMap[parentId]) childMap[parentId] = [];
       childMap[parentId].push(b);
     } else {
@@ -303,7 +306,7 @@ function renderBlocks(blocks, overridePageTitle) {
   // If no parent relationships detected (flat list), treat all as top-level
   const renderList = topBlocks.length > 0 ? topBlocks : blocks;
 
-  const html = renderList.map(b => {
+  function renderOne(b) {
     const level = b['block/level'] || 0;
     const content = b['block/content'] || '';
     const todo = b['block/todo'];
@@ -335,27 +338,15 @@ function renderBlocks(blocks, overridePageTitle) {
       contentHtml += '</div>';
     }
 
-    // Render children inline if any
-    let childrenHtml = '';
-    if (children.length > 0) {
-      childrenHtml = children.map(c => {
-        let ch = '';
-        const cTodo = c['block/todo'];
-        if (cTodo) ch += `<span class="todo-${cTodo}">${cTodo} </span>`;
-        ch += renderContent(c['block/content'] || '');
-        const cContent = c['block/content'] || '';
-        const cLevel = c['block/level'] || (level + 1);
-        return `<div class="block block-level-${cLevel}" data-block-id="${escapeAttr(c['block/id']||'')}" data-page-title="${escapeAttr(pageTitle)}" data-raw-content="${escapeAttr(cContent)}"><div class="block-content">${ch}</div></div>`;
-      }).join('');
-    }
+    const childrenHtml = children.map(renderOne).join('');
 
     return `
       <div class="block block-level-${level}" data-block-id="${escapeAttr(b['block/id']||'')}" data-page-title="${escapeAttr(pageTitle)}" data-raw-content="${escapeAttr(content)}" id="blk-${(b['block/id']||'').replace(/[^a-zA-Z0-9-]/g,'_')}">
         <div class="block-content">${contentHtml}${childrenHtml}</div>
       </div>`;
-  });
+  }
 
-  return html.join('');
+  return renderList.map(renderOne).join('');
 }
 
 // ─── Page rendering ──────────────────────────────────────────
@@ -423,6 +414,60 @@ let editingBlockId = null;
 let tapOutSaveSuppressed = false; // set by Cancel/×/Escape so focusout doesn't save
 let editingBlockEl = null;
 let ghostBlock = null;
+let composerSize = 'compact';
+let captureEntry = false;
+
+function setComposerSize(size) {
+  composerSize = size;
+  const bar = document.getElementById('compose-bar');
+  bar.dataset.size = size;
+  document.getElementById('composer-collapse').hidden = size === 'compact';
+  const expand = document.getElementById('composer-expand');
+  expand.setAttribute('aria-label', size === 'full' ? 'Exit full screen' : 'Expand to full screen');
+  expand.innerHTML = size === 'full' ? '↙ <span>Reduce</span>' : '⤢ <span>Expand</span>';
+}
+
+// Fetch fresh IDs without replacing the surrounding journal or showing a loading screen.
+async function refreshWrittenPage(title) {
+  const view = currentPage;
+  const data = await api('/page/' + encodeURIComponent(title));
+  if (view !== currentPage) return;
+  const content = document.getElementById('content');
+  let container = [...content.querySelectorAll('.journal-day')]
+    .find(day => day.dataset.date === title)?.querySelector('.blocks');
+  if (!container && currentPage === title) {
+    container = content.querySelector('.blocks');
+    if (!container) {
+      content.querySelector('.ghost-page-notice')?.remove();
+      container = document.createElement('div');
+      container.className = 'blocks';
+      content.append(container);
+    }
+  }
+  if (!container && currentPage === '__journal__') {
+    let timeline = content.querySelector('.journal-timeline');
+    if (!timeline) {
+      content.querySelector('.empty-state')?.remove();
+      timeline = document.createElement('div');
+      timeline.className = 'journal-timeline';
+      content.append(timeline);
+    }
+    const day = document.createElement('div');
+    day.className = 'journal-day';
+    day.dataset.date = title;
+    day.innerHTML = `<div class="journal-date-header"><a>${escapeHtml(title)}</a></div><div class="blocks"></div>`;
+    day.querySelector('a').addEventListener('click', () => loadPage(title));
+    timeline.prepend(day);
+    container = day.querySelector('.blocks');
+  }
+  if (!container) return;
+  const scroll = content.scrollTop;
+  container.innerHTML = renderBlocks(data.blocks || [], title);
+  wirePageRefs();
+  wireTagClicks();
+  wireBlockInterstials();
+  content.scrollTop = scroll;
+}
 
 // Enter edit mode for a block
 function enterEditMode(blockEl) {
@@ -435,6 +480,8 @@ function enterEditMode(blockEl) {
   // Skip component blocks (events, asks) — they have structured cards
   if (blockEl.querySelector('.event-card, .ask-card')) return;
 
+  localStorage.setItem(CAPTURE_DRAFT_KEY, document.getElementById('journal-input').value);
+  setComposerSize('writing');
   editingBlockId = blockId;
   editingBlockEl = blockEl;
 
@@ -512,8 +559,8 @@ function exitEditMode() {
   // Restore compose bar UI
   const input = document.getElementById('journal-input');
   const btn = document.getElementById('journal-submit');
-  if (input) { input.value = ''; input.style.height = 'auto'; }
-  if (btn) btn.textContent = '↑';
+  if (input) { input.value = localStorage.getItem(CAPTURE_DRAFT_KEY) || ''; input.style.height = 'auto'; }
+  if (btn) btn.textContent = 'Save ↑';
 
   const composeLabel = document.querySelector('#compose-bar .compose-label');
   if (composeLabel) {
@@ -540,7 +587,7 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// ─── Ghost Block (insert via hover "+") ──────────────────────────
+// ─── Inline new block / sub-block editor ──────────────────────
 function removeGhostBlock() {
   if (ghostBlock) {
     ghostBlock.element.remove();
@@ -548,99 +595,56 @@ function removeGhostBlock() {
   }
 }
 
-function createGhostBlock(afterBlockEl) {
+function createGhostBlock(afterBlockEl, subBlock = false) {
+  if (ghostBlock?.saving) return;
+  if (ghostBlock?.textarea.value.trim() && !confirm('Discard the unfinished block?')) return;
   removeGhostBlock();
-
-  const afterBlockId = afterBlockEl.dataset.blockId;
-  const levelMatch = afterBlockEl.className.match(/block-level-(\d+)/);
-  const level = parseInt(levelMatch ? levelMatch[1] : '0');
-  const pageTitle = afterBlockEl.dataset.pageTitle || currentPage;
-
-  const ghostDiv = document.createElement('div');
-  ghostDiv.className = `block ghost-block block-level-${level}`;
-
-  ghostDiv.innerHTML = `
-    <div class="ghost-content">
-      <textarea placeholder="Type here…"></textarea>
-      <span class="ghost-level">L${level}</span>
-    </div>`;
-
-  const lastChild = afterBlockEl.querySelector(':scope > .block:last-child');
-  if (lastChild) {
-    lastChild.after(ghostDiv);
-  } else {
-    afterBlockEl.after(ghostDiv);
-  }
-
-  const textarea = ghostDiv.querySelector('textarea');
+  const level = Number(afterBlockEl.className.match(/block-level-(\d+)/)?.[1] || 0) + (subBlock ? 1 : 0);
+  if (level > 5) return;
+  const editor = document.createElement('div');
+  editor.className = `block ghost-block block-level-${level}`;
+  editor.innerHTML = `<div class="ghost-content">
+    <label>${subBlock ? 'New sub-block' : 'New block'}<textarea aria-label="${subBlock ? 'New sub-block' : 'New block'} content" placeholder="Write here…" rows="3"></textarea></label>
+    <div class="ghost-actions"><span role="status" class="ghost-status"></span><button type="button" data-cancel>Cancel</button><button type="button" data-save>Save block</button></div>
+  </div>`;
+  // The API inserts after the target's descendants. A child belongs inside
+  // the target; a sibling belongs after the complete target subtree.
+  if (subBlock) (afterBlockEl.querySelector(':scope > .block-content') || afterBlockEl).append(editor);
+  else afterBlockEl.after(editor);
+  const textarea = editor.querySelector('textarea');
+  ghostBlock = { element: editor, afterBlockId: afterBlockEl.dataset.blockId,
+    level, textarea, pageTitle: afterBlockEl.dataset.pageTitle || currentPage, saving: false };
+  editor.querySelector('[data-cancel]').addEventListener('click', removeGhostBlock);
+  editor.querySelector('[data-save]').addEventListener('click', submitGhostBlock);
+  textarea.addEventListener('keydown', e => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); submitGhostBlock(); }
+    if (e.key === 'Escape' && !ghostBlock?.saving) removeGhostBlock();
+  });
   textarea.focus();
-
-  ghostBlock = { element: ghostDiv, afterBlockId, level, textarea, pageTitle };
-
-  textarea.addEventListener('keydown', (e) => {
-    if (e.key === 'Tab' && !e.shiftKey) {
-      e.preventDefault();
-      if (ghostBlock.level < 5) {
-        ghostBlock.level++;
-        ghostDiv.className = `block ghost-block block-level-${ghostBlock.level}`;
-        ghostDiv.querySelector('.ghost-level').textContent = `L${ghostBlock.level}`;
-      }
-    } else if (e.key === 'Tab' && e.shiftKey) {
-      e.preventDefault();
-      if (ghostBlock.level > 0) {
-        ghostBlock.level--;
-        ghostDiv.className = `block ghost-block block-level-${ghostBlock.level}`;
-        ghostDiv.querySelector('.ghost-level').textContent = `L${ghostBlock.level}`;
-      }
-    } else if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      submitGhostBlock();
-    } else if (e.key === 'Escape') {
-      removeGhostBlock();
-    }
-  });
-
-  textarea.addEventListener('input', () => {
-    textarea.style.height = 'auto';
-    textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
-  });
 }
 
 async function submitGhostBlock() {
-  if (!ghostBlock) return;
-
-  const content = ghostBlock.textarea.value.trim();
-  if (!content) {
-    removeGhostBlock();
+  const draft = ghostBlock;
+  if (!draft || draft.saving) return;
+  const text = draft.textarea.value.trim();
+  if (!text) return;
+  draft.saving = true;
+  draft.element.querySelectorAll('button, textarea').forEach(el => el.disabled = true);
+  const status = draft.element.querySelector('.ghost-status');
+  status.textContent = 'Saving…';
+  try {
+    const result = await apiPost('/insert-block', '{:page "' + escapeEdn(draft.pageTitle) + '" :content "' + escapeEdn(text) + '" :level ' + draft.level + ' :after-block-id "' + escapeEdn(draft.afterBlockId) + '"}');
+    if (result.error) throw new Error(result.error);
+  } catch (error) {
+    draft.saving = false;
+    draft.element.querySelectorAll('button, textarea').forEach(el => el.disabled = false);
+    status.textContent = 'Couldn’t save. Your text is still here; try again.';
     return;
   }
-
-  const { afterBlockId, level, pageTitle } = ghostBlock;
-  const ednBody = '{:page "' + escapeEdn(pageTitle || '') + '" :content "' + escapeEdn(content) + '" :level ' + level + ' :after-block-id "' + escapeEdn(afterBlockId) + '"}';
-
-  try {
-    const result = await apiPost('/insert-block', ednBody);
-    if (result.error) throw new Error(result.error);
-    const newBlockId = result['block-id'] || '';
-
-    // Block IDs shift on every reindex, so a DOM patch leaves other blocks
-    // with stale IDs. Full re-render keeps every data-block-id valid.
-    removeGhostBlock();
-
-    const isJournal = pageTitle && /^\d{4}_\d{2}_\d{2}$/.test(pageTitle);
-    if (isJournal) {
-      await loadJournalTimeline();
-    } else if (pageTitle) {
-      await loadPage(pageTitle, { fromHash: true });
-    }
-    if (newBlockId) {
-      const updated = document.querySelector(`[data-block-id=\"${CSS.escape(newBlockId)}\"]`);
-      if (updated) updated.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-  } catch (e) {
-    showToast('Failed to insert block', null);
-    removeGhostBlock();
-  }
+  // A refresh failure must never offer a second submission of a saved block.
+  removeGhostBlock();
+  try { await refreshWrittenPage(draft.pageTitle); }
+  catch { showToast('Block saved. Reload to see the latest blocks.', null); }
 }
 
 // Interstitial + button — creates a ghost block after the target block
@@ -654,6 +658,13 @@ document.addEventListener('click', (e) => {
       : addBtn.previousElementSibling;
     if (blockEl) createGhostBlock(blockEl);
   }
+});
+
+document.addEventListener('click', e => {
+  if (e.target.closest('button, a, textarea, input, .ghost-block')) return;
+  const selected = e.target.closest('.block[data-block-id]');
+  document.querySelectorAll('.block-selected').forEach(el => el.classList.remove('block-selected'));
+  selected?.classList.add('block-selected');
 });
 
 // Block context menu — right-click or long-press
@@ -670,7 +681,7 @@ document.addEventListener('contextmenu', (e) => {
 
 document.addEventListener('touchstart', (e) => {
   const blockEl = e.target.closest('.block[data-block-id]');
-  if (blockEl && !e.target.closest('.block-insert')) {
+  if (blockEl && !e.target.closest('button, textarea, input, .ghost-block')) {
     blockCtxLongPressTimer = setTimeout(() => {
       const touch = e.touches[0];
       showBlockCtxMenu(blockEl, touch.clientX, touch.clientY);
@@ -701,6 +712,8 @@ function showBlockCtxMenu(blockEl, x, y) {
   if (!menu) return;
   const indentBtn = document.getElementById('blk-ctx-indent');
   const outdentBtn = document.getElementById('blk-ctx-outdent');
+  const childBtn = document.getElementById('blk-ctx-child');
+  if (childBtn) childBtn.disabled = level >= 5;
 
   if (indentBtn) indentBtn.style.display = level < 5 ? '' : 'none';
   if (outdentBtn) outdentBtn.style.display = level > 0 ? '' : 'none';
@@ -723,7 +736,8 @@ function hideBlockCtxMenu() {
         <button class="ctx-menu-item" id="blk-ctx-edit" data-action="edit">✏️ Edit block</button>
         <button class="ctx-menu-item" id="blk-ctx-indent" data-action="indent">→ Indent</button>
         <button class="ctx-menu-item" id="blk-ctx-outdent" data-action="outdent">← Outdent</button>
-        <button class="ctx-menu-item" id="blk-ctx-add" data-action="add">+ Add block below</button>
+        <button class="ctx-menu-item" id="blk-ctx-add" data-action="add">+ New block</button>
+        <button class="ctx-menu-item" id="blk-ctx-child">↳ New sub-block</button>
         <button class="ctx-menu-item ctx-menu-item-danger" id="blk-ctx-delete" data-action="delete">✕ Delete block</button>
       `;
       wireBlockCtxMenu();
@@ -758,6 +772,12 @@ function wireBlockCtxMenu() {
     if (blockCtxTarget) createGhostBlock(blockCtxTarget);
     hideBlockCtxMenu();
   });
+  const blkChild = document.getElementById('blk-ctx-child');
+  if (blkChild) blkChild.onclick = () => {
+    const target = blockCtxTarget;
+    hideBlockCtxMenu();
+    if (target) createGhostBlock(target, true);
+  };
   const blkDelete = document.getElementById('blk-ctx-delete');
   if (blkDelete) blkDelete.addEventListener('click', () => {
     if (blockCtxTarget) deleteBlock(blockCtxTarget);
@@ -863,6 +883,8 @@ async function doDeleteBlock(blockId, pageTitle, inheritChildren) {
 
 // Update compose bar context when navigating
 function updateComposeContext(pageTitle, isJournal) {
+  captureEntry = false;
+  if (composerSize === 'full') setComposerSize('compact');
   composePageTitle = pageTitle;
   composeIsJournal = isJournal;
 
@@ -872,6 +894,7 @@ function updateComposeContext(pageTitle, isJournal) {
   if (isJournal) {
     // Already on a journal page — force journal mode, disable page pill
     composeWriteMode = 'journal';
+    document.getElementById('composer-label').textContent = 'Write in today’s journal';
     journalPill.classList.add('active');
     pagePill.classList.remove('active');
     pagePill.disabled = true;
@@ -901,6 +924,37 @@ function initComposeBar() {
   const journalPill = document.getElementById('pill-journal');
   const pagePill = document.getElementById('pill-page');
   const typePills = document.querySelectorAll('#compose-bar .type-pill');
+
+  input.value = localStorage.getItem(CAPTURE_DRAFT_KEY) || '';
+  setComposerSize('compact');
+  document.getElementById('composer-expand').onclick = () => {
+    setComposerSize(composerSize === 'full' ? 'writing' : 'full');
+    input.focus();
+  };
+  document.getElementById('composer-collapse').onclick = () => {
+    input.blur();
+    setComposerSize('compact');
+    captureEntry = false;
+    if (hashRoute()?.name === 'capture') {
+      history.replaceState({}, '', '#/');
+    }
+  };
+  input.addEventListener('focus', () => { if (composerSize === 'compact') setComposerSize('writing'); });
+  input.addEventListener('input', () => {
+    if (!editingBlockId && composeBlockType === 'note') localStorage.setItem(CAPTURE_DRAFT_KEY, input.value);
+  });
+  const bar = document.getElementById('compose-bar');
+  new ResizeObserver(() => document.documentElement.style.setProperty('--compose-h', bar.offsetHeight + 'px')).observe(bar);
+  const syncViewport = () => {
+    const viewport = window.visualViewport;
+    document.documentElement.style.setProperty('--writing-viewport', (viewport?.height || window.innerHeight) + 'px');
+    bar.style.bottom = Math.max(0, window.innerHeight - (viewport?.height || window.innerHeight) - (viewport?.offsetTop || 0)) + 'px';
+  };
+  window.visualViewport?.addEventListener('resize', syncViewport);
+  window.visualViewport?.addEventListener('scroll', syncViewport);
+  syncViewport();
+  renderCaptureQueue();
+  window.addEventListener('online', flushCaptureQueue);
 
   // ── Schema field rendering ──
   function renderSchemaFields(typeKey) {
@@ -985,13 +1039,16 @@ function initComposeBar() {
 
   // ── Write mode toggle ──
   journalPill.addEventListener('click', () => {
+    if (btn.disabled) return;
     composeWriteMode = 'journal';
+    document.getElementById('composer-label').textContent = 'Write in today’s journal';
     journalPill.classList.add('active');
     pagePill.classList.remove('active');
   });
   pagePill.addEventListener('click', () => {
-    if (pagePill.disabled) return;
+    if (pagePill.disabled || btn.disabled) return;
     composeWriteMode = 'page';
+    document.getElementById('composer-label').textContent = 'New block on this page';
     pagePill.classList.add('active');
     journalPill.classList.remove('active');
   });
@@ -999,7 +1056,9 @@ function initComposeBar() {
   // ── Block type toggle ──
   typePills.forEach(pill => {
     pill.addEventListener('click', () => {
+      if (btn.disabled) return;
       composeBlockType = pill.dataset.blockType;
+      bar.dataset.blockType = composeBlockType;
       typePills.forEach(p => p.classList.remove('active'));
       pill.classList.add('active');
       renderSchemaFields(composeBlockType);
@@ -1009,7 +1068,7 @@ function initComposeBar() {
         input.placeholder = 'Ask a question…';
         titleInput.placeholder = '(optional context)';
       } else {
-        input.placeholder = 'Write something…';
+        input.placeholder = composeWriteMode === 'journal' ? 'Write in today’s journal…' : 'Write a new block…';
         titleInput.placeholder = 'Title or #tags (optional)…';
       }
     });
@@ -1053,6 +1112,7 @@ function initComposeBar() {
 
   // ── Submit ──
   btn.addEventListener('click', async () => {
+    if (btn.disabled) return;
     // ── Edit mode: update existing block ──
     if (editingBlockId) {
       const content = input.value.trim();
@@ -1061,20 +1121,12 @@ function initComposeBar() {
       try {
         const result = await apiPost('/update-block', '{:id "' + escapeEdn(editingBlockId) + '" :content "' + escapeEdn(content) + '"}');
         if (result.error) throw new Error(result.error);
-        const newBlockId = result['block-id'] || editingBlockId;
         // Capture page title BEFORE exitEditMode nulls editingBlockEl,
         // and BEFORE loadPage rewrites the DOM.
         const pageTitle = editingBlockEl?.dataset.pageTitle || currentPage;
         exitEditMode();
-        // Full re-render: block IDs shift on every reindex, so a DOM patch
-        // would leave other blocks with stale IDs → next edit fails silently.
-        if (pageTitle && /^\d{4}_\d{2}_\d{2}$/.test(pageTitle)) {
-          await loadJournalTimeline();
-        } else if (pageTitle) {
-          await loadPage(pageTitle, { fromHash: true });
-        }
-        const updated = document.querySelector(`[data-block-id="${CSS.escape(newBlockId)}"]`);
-        if (updated) updated.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        try { await refreshWrittenPage(pageTitle); }
+        catch { showToast('Block updated. Reload to see the latest blocks.', null); }
         showToast('Block updated', null);
       } catch (e) {
         showToast('Failed to update — try again', null);
@@ -1084,48 +1136,59 @@ function initComposeBar() {
     }
 
     // ── Normal mode: append new block ──
-    const content = buildContent();
+    let content = buildContent();
     if (!content) return;
+    if (captureEntry && composeWriteMode === 'journal' && composeBlockType === 'note') content = `${captureTimeLabel()} — ${content}${CAPTURE_TAG}`;
+    const targetPage = composeWriteMode === 'journal' ? todayJournalPage() : composePageTitle;
+    const journalMode = composeWriteMode === 'journal';
+    const label = journalMode ? "today's journal" : 'this page';
     btn.disabled = true;
+    input.readOnly = true;
+    titleInput.readOnly = true;
 
     try {
-      if (composeWriteMode === 'journal') {
+      if (journalMode) {
         await apiPost('/append', '{:content "' + escapeEdn(content) + '" :journal true}');
       } else {
-        await apiPost('/append', '{:title "' + escapeEdn(composePageTitle) + '" :content "' + escapeEdn(content) + '"}');
+        await apiPost('/append', '{:title "' + escapeEdn(targetPage) + '" :content "' + escapeEdn(content) + '"}');
       }
 
+      localStorage.removeItem(CAPTURE_DRAFT_KEY);
       // Clear inputs
       if (titleInput) titleInput.value = '';
       input.value = '';
       input.style.height = 'auto';
       renderSchemaFields(composeBlockType);
 
-      btn.disabled = false;
-
-      const targetPage = composeWriteMode === 'journal' ? todayJournalPage() : composePageTitle;
-      const label = composeWriteMode === 'journal' ? "today's journal" : 'this page';
       showToast(`Added to ${label}`, targetPage);
-      // Reload timeline if in journal mode, otherwise reload the page
-      if (composeWriteMode === 'journal') {
-        loadJournalTimeline();
-      } else {
-        loadPage(targetPage);
-      }
+      try { await refreshWrittenPage(targetPage); }
+      catch { showToast('Saved. Reload to see the latest blocks.', null); }
     } catch (e) {
       btn.disabled = false;
-      showToast('Failed to save — try again', null);
+      if (!navigator.onLine && journalMode && composeBlockType === 'note') {
+        const queue = readCaptureQueue();
+        queue.push({ at: new Date().toISOString(), text: input.value, content });
+        writeCaptureQueue(queue);
+        input.value = '';
+        localStorage.removeItem(CAPTURE_DRAFT_KEY);
+        renderCaptureQueue();
+        showToast('Offline — saved to your queue', null);
+      } else showToast('Couldn’t save. Your draft is still here.', null);
+    } finally {
+      btn.disabled = false;
+      input.readOnly = false;
+      titleInput.readOnly = false;
     }
   });
 
-  // ── Enter to submit (Shift+Enter for newline) ──
+  // ── Enter writes a newline; Cmd/Ctrl+Enter saves ──
   // The slash menu owns navigation keys while it's open.
   input.addEventListener('keydown', (e) => {
     if (isSlashMenuOpen()) {
       handleSlashKeydown(e);
       return; // menu handles Enter/Arrows/Escape; skip normal submit
     }
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       btn.click();
     }
@@ -1153,7 +1216,7 @@ function initComposeBar() {
   // ── Auto-resize textarea ──
   input.addEventListener('input', () => {
     input.style.height = 'auto';
-    input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+    input.style.height = Math.min(input.scrollHeight, 320) + 'px';
   });
 }
 
@@ -1287,7 +1350,7 @@ async function selectSlashTemplate(tpl) {
   const children = (tpl && tpl.children) || [];
   const content = children.join('\n');
   if (!content.trim()) {
-    if (input) { input.value = ''; input.style.height = 'auto'; }
+    if (input) { input.value = localStorage.getItem(CAPTURE_DRAFT_KEY) || ''; input.style.height = 'auto'; }
     return;
   }
 
@@ -1299,7 +1362,7 @@ async function selectSlashTemplate(tpl) {
     }
 
     // Clear the textarea after a successful insert
-    if (input) { input.value = ''; input.style.height = 'auto'; }
+    if (input) { input.value = localStorage.getItem(CAPTURE_DRAFT_KEY) || ''; input.style.height = 'auto'; }
 
     if (composeWriteMode === 'journal') {
       loadJournalTimeline();
@@ -1659,6 +1722,8 @@ async function loadTagPage(tagName) {
 // Wire all .inline-tag elements to navigate to tag pages
 function wireTagClicks() {
   document.querySelectorAll('.inline-tag[data-tag]').forEach(el => {
+    if (el.dataset.wired) return;
+    el.dataset.wired = 'true';
     el.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -1695,7 +1760,7 @@ async function doSearch(query) {
 
 function wirePageRefs() {
   document.querySelectorAll('.page-ref').forEach(el => {
-    el.addEventListener('click', () => loadPage(el.getAttribute('data-page')));
+    el.onclick = () => loadPage(el.getAttribute('data-page'));
   });
 }
 
@@ -1703,22 +1768,23 @@ function wirePageRefs() {
 // Injects a thin + button between blocks. On desktop: hover to reveal.
 // On mobile: always visible (thin hit target).
 function wireBlockInterstials() {
-  // Remove old interstitials first (for re-render)
-  document.querySelectorAll('.block-insert').forEach(el => el.remove());
-
-  const blocksContainers = document.querySelectorAll('.blocks');
-  blocksContainers.forEach(container => {
-    const blocks = container.querySelectorAll(':scope > .block');
-    blocks.forEach(block => {
-      const blockId = block.dataset.blockId;
-      if (!blockId) return;
-
-      const insert = document.createElement('div');
-      insert.className = 'block-insert';
-      insert.dataset.afterBlockId = blockId;
-      insert.textContent = '+';
-      block.after(insert);
+  document.querySelectorAll('.block-insert, .block-actions').forEach(el => el.remove());
+  document.querySelectorAll('.blocks .block[data-block-id]').forEach(block => {
+    const actions = document.createElement('div');
+    actions.className = 'block-actions';
+    actions.innerHTML = '<button type="button" data-new>+ New block</button><button type="button" data-child>↳ New sub-block</button><button type="button" data-more aria-label="More block actions">•••</button>';
+    actions.addEventListener('dblclick', e => e.stopPropagation());
+    actions.addEventListener('click', e => {
+      e.stopPropagation();
+      if (e.target.closest('[data-new]')) createGhostBlock(block);
+      else if (e.target.closest('[data-child]')) createGhostBlock(block, true);
+      else if (e.target.closest('[data-more]')) {
+        const rect = e.target.getBoundingClientRect();
+        showBlockCtxMenu(block, rect.left, rect.bottom);
+      }
     });
+    actions.querySelector('[data-child]').disabled = Number(block.className.match(/block-level-(\d+)/)?.[1] || 0) >= 5;
+    block.append(actions);
   });
 }
 
@@ -3038,9 +3104,8 @@ function runForceGraph(canvas, data) {
 
 // ═══════════════════════════════════════════════════════════════
 // ─── Quick Capture (/capture) ─────────────────────────────────
-// Zero-chrome capture surface for mobile dictation. Appends
-// timestamped blocks to today's journal via POST /append
-// (:journal true). Self-contained — runs no other view code.
+// Capture shortcuts open the shared composer at full size.
+// Timestamped capture entries retain the existing capture format and queue.
 // ═══════════════════════════════════════════════════════════════
 
 const CAPTURE_TAG = ' #capture';              // '' to disable tagging
@@ -3064,64 +3129,22 @@ function captureSharePrefill(sp) {
 }
 
 async function loadCaptureView(prefillText = null) {
-  currentPage = null;
-  const content = document.getElementById('content');
-  const composeBar = document.getElementById('compose-bar');
-  if (composeBar) composeBar.classList.add('hidden');
-  const sidebar = document.getElementById('sidebar');
-  if (sidebar) sidebar.classList.remove('open');
-
-  content.innerHTML = `
-    <div class="capture-wrap">
-      <div class="capture-head">
-        <a href="#/" class="capture-back" aria-label="Back">←</a>
-        <span class="capture-title">Capture</span>
-        <span id="capture-clock" class="capture-clock">${captureTimeLabel()}</span>
-      </div>
-      <div class="capture-stage">
-        <textarea id="capture-input" class="capture-input" rows="5"
-          placeholder="Say it or type it…" autocomplete="off" autocapitalize="sentences"></textarea>
-        <div id="capture-queued" class="capture-queued hidden"></div>
-      </div>
-      <div class="capture-foot">
-        <span id="capture-status" class="capture-status"></span>
-        <button id="capture-send" class="capture-send">Send ↑</button>
-      </div>
-    </div>`;
-
-  const input = document.getElementById('capture-input');
-
+  if (editingBlockId) exitEditMode();
+  if (currentPage !== '__journal__') await loadJournalTimeline();
+  captureEntry = true;
+  document.getElementById('write-title').value = '';
+  document.getElementById('pill-journal').click();
+  document.querySelector('[data-block-type="note"]').click();
+  const input = document.getElementById('journal-input');
   if (prefillText) {
-    input.value = prefillText;
-  } else {
-    const draft = localStorage.getItem(CAPTURE_DRAFT_KEY);
-    if (draft) input.value = draft;
+    input.value = [input.value, prefillText].filter(Boolean).join('\n');
+    localStorage.setItem(CAPTURE_DRAFT_KEY, input.value);
   }
+  document.getElementById('compose-bar').classList.remove('hidden');
+  document.getElementById('sidebar').classList.remove('open');
+  setComposerSize('full');
   renderCaptureQueue();
-
-  let draftTimer = null;
-  input.addEventListener('input', () => {
-    clearTimeout(draftTimer);
-    draftTimer = setTimeout(() => {
-      if (input.value.trim()) localStorage.setItem(CAPTURE_DRAFT_KEY, input.value);
-      else localStorage.removeItem(CAPTURE_DRAFT_KEY);
-    }, 300);
-  });
-
-  // Desktop convenience: Cmd/Ctrl+Enter sends. Enter stays newline (dictation-safe).
-  input.addEventListener('keydown', (e) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-      e.preventDefault();
-      sendCapture();
-    }
-  });
-
-  document.getElementById('capture-send').addEventListener('click', sendCapture);
-  window.addEventListener('online', flushCaptureQueue);
-
-  // Focus fast — Android won't auto-open the keyboard, but focus must be
-  // instant so the mic tap on Gboard lands in the textarea immediately.
-  requestAnimationFrame(() => input.focus());
+  input.focus();
 }
 
 function renderCaptureQueue() {
@@ -3151,52 +3174,30 @@ function writeCaptureQueue(q) {
   else localStorage.setItem(CAPTURE_QUEUE_KEY, JSON.stringify(q));
 }
 
-async function sendCapture() {
-  const input = document.getElementById('capture-input');
-  const status = document.getElementById('capture-status');
-  if (!input) return;
-  const text = input.value.trim();
-  if (!text) return;
-
-  const content = `${captureTimeLabel()} — ${text}${CAPTURE_TAG}`;
-  try {
-    await apiPost('/append', '{:content "' + escapeEdn(content) + '" :journal true}');
-    localStorage.removeItem(CAPTURE_DRAFT_KEY);
-    input.value = '';
-    input.style.height = 'auto';
-    if (status) {
-      status.textContent = `Saved ✓ ${captureTimeLabel()}`;
-      setTimeout(() => { if (status) status.textContent = ''; }, 2500);
-    }
-    input.focus();
-  } catch (e) {
-    // Offline / server unreachable — queue with the CAPTURE time, not send time
-    const q = readCaptureQueue();
-    q.push({ at: new Date().toISOString(), text });
-    writeCaptureQueue(q);
-    localStorage.removeItem(CAPTURE_DRAFT_KEY);
-    input.value = '';
-    if (status) status.textContent = 'Offline — queued';
-    renderCaptureQueue();
-    input.focus();
-  }
-}
-
+let captureFlushing = false;
 async function flushCaptureQueue() {
+  if (captureFlushing) return;
   const q = readCaptureQueue();
   if (q.length === 0) return;
+  captureFlushing = true;
   const remaining = [];
   for (const item of q) {
     const when = captureTimeLabel(new Date(item.at));
-    const content = `${when} — ${item.text}${CAPTURE_TAG}`;
+    const content = item.content || `${when} — ${item.text}${CAPTURE_TAG}`;
     try {
       await apiPost('/append', '{:content "' + escapeEdn(content) + '" :journal true}');
     } catch {
       remaining.push(item);
     }
   }
-  writeCaptureQueue(remaining);
+  // Preserve entries captured while the original queue was sending.
+  writeCaptureQueue([...remaining, ...readCaptureQueue().slice(q.length)]);
+  captureFlushing = false;
   renderCaptureQueue();
+  if (remaining.length < q.length) {
+    try { await refreshWrittenPage(todayJournalPage()); }
+    catch { showToast('Queued entries saved. Reload to see the latest blocks.', null); }
+  }
   const status = document.getElementById('capture-status');
   if (status && remaining.length === 0) {
     status.textContent = `Queued sent ✓ (${q.length})`;
