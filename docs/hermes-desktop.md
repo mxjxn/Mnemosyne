@@ -104,9 +104,11 @@ separate switches; both need to be on.
 ## Daily use
 
 Open **Notes** for the full workspace, or use the companion pane beside a chat.
-The workspace and companion share their selected page and drafts. You can close
-the companion when using the full workspace; Hermes's **Reset layout** restores
-it if you want it back.
+The workspace and companion share their selected page and drafts. Use Hermes's
+layout tabs to switch between views. In current Hermes Desktop builds, closing
+a plugin's only contributed pane disables that plugin, including its workspace
+navigation. Re-enable **Logseq Notes** in **Capabilities → Plugins** to restore
+it; your saved drafts remain available.
 
 Write in the journal composer and choose **Save block**, or press Cmd/Ctrl+Enter.
 Enter inserts a newline. Expand/Reduce/Done change the writing area without
