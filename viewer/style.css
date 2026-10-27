@@ -1932,3 +1932,65 @@ hr {
   font: inherit;
   font-size: .85rem;
 }
+
+/* One composer, from a journal-sized invitation to focused writing. */
+#compose-bar { border-radius: 18px 18px 0 0; box-shadow: 0 -8px 28px rgba(0,0,0,.05); }
+#compose-bar .compose-inner { padding: 16px 20px max(12px, env(safe-area-inset-bottom)); gap: 10px; }
+.composer-heading, .composer-size-controls, .composer-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.composer-heading label { font-size: .95rem; font-weight: 600; }
+.composer-size-controls button, .ghost-actions button, .block-actions button { font: inherit; color: var(--text-dim); background: transparent; border: 1px solid var(--border); border-radius: 8px; min-height: 44px; padding: 8px 12px; cursor: pointer; }
+.composer-size-controls button[hidden] { display: none; }
+.composer-footer { color: var(--text-dim); font-size: .75rem; }
+#compose-bar #journal-input { min-height: 88px; max-height: 100%; font-size: 1rem; line-height: 1.55; padding: 12px; border-radius: 12px; }
+#compose-bar #journal-submit { width: auto; min-width: 82px; height: 48px; padding: 0 12px; font-size: .9rem; border-radius: 10px; }
+#compose-bar[data-size="writing"] { height: min(52dvh, 540px); height: min(calc(var(--writing-viewport, 100dvh) * .58), 540px); }
+#compose-bar[data-size="full"] { left: 0; height: var(--writing-viewport, 100dvh); z-index: 200; border-radius: 0; }
+#compose-bar[data-size="writing"] .compose-inner, #compose-bar[data-size="full"] .compose-inner { height: 100%; box-sizing: border-box; }
+#compose-bar[data-size="writing"] .compose-bottom, #compose-bar[data-size="full"] .compose-bottom { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#compose-bar[data-size="writing"] .compose-textarea-wrap, #compose-bar[data-size="full"] .compose-textarea-wrap { flex: 1; min-height: 0; }
+#compose-bar[data-size="writing"] #journal-input, #compose-bar[data-size="full"] #journal-input { height: 100% !important; min-height: 48px; }
+#compose-bar[data-size="full"] .compose-inner { padding-top: max(16px, env(safe-area-inset-top)); }
+#compose-bar .capture-queued { max-height: 100px; overflow: auto; margin: 0; }
+#compose-bar button:focus-visible, .block-actions button:focus-visible, .ghost-actions button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.block-actions { display: flex; gap: 6px; margin: 8px 0 4px; flex-wrap: wrap; }
+.block-actions button { min-height: 36px; padding: 4px 10px; font-size: .75rem; }
+.block-actions button:hover, .composer-size-controls button:hover { color: var(--accent); border-color: var(--accent); }
+.block .block-actions { opacity: .65; }
+.block:hover > .block-actions, .block:focus-within > .block-actions { opacity: 1; }
+.ghost-block { margin-top: 12px; border: 1px solid var(--accent); border-radius: 12px; padding: 12px; animation: none; }
+.ghost-content label { display: block; font-size: .85rem; color: var(--text-dim); }
+.ghost-block textarea { display: block; width: 100%; min-height: 96px; box-sizing: border-box; font: inherit; line-height: 1.5; margin-top: 8px; }
+.ghost-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 8px; }
+.ghost-status { flex: 1; font-size: .8rem; color: var(--text-dim); }
+.ghost-actions [data-save] { color: white; background: var(--accent); border-color: var(--accent); }
+#journal-submit:disabled, .ghost-actions button:disabled { opacity: .5; cursor: wait; }
+@media (max-width: 768px) {
+  #compose-bar .compose-inner { padding: 10px 12px max(10px, env(safe-area-inset-bottom)); gap: 8px; }
+  .composer-heading label { font-size: .85rem; }
+  .composer-size-controls button { padding: 6px 10px; }
+  .composer-size-controls span { display: none; }
+  .block-actions button { min-height: 44px; }
+  #compose-bar #journal-input { min-height: 72px; font-size: 16px; }
+  #compose-bar[data-size="writing"] { height: calc(var(--writing-viewport, 100dvh) * .7); }
+  #compose-bar[data-size="writing"] .composer-footer { display: none; }
+  #compose-bar .write-pill, #compose-bar .type-pill { min-height: 36px; font-size: .75rem; }
+  #compose-bar[data-size="writing"][data-block-type="note"] #write-title:placeholder-shown { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { #compose-bar { transition: none; } }
+
+/* Reserve action positions so revealing them never moves the menu target. */
+.block-actions { justify-content: flex-end; }
+.block-actions [data-new], .block-actions [data-child] { display: inline-block; visibility: hidden; }
+.block-selected > .block-actions [data-new], .block-selected > .block-actions [data-child],
+.block:focus-within > .block-actions [data-new], .block:focus-within > .block-actions [data-child] { visibility: visible; }
+@media (hover: hover) {
+  .block:hover > .block-actions [data-new], .block:hover > .block-actions [data-child] { visibility: visible; }
+}
+.block-content > .block { margin-left: 20px; }
+#compose-bar[data-size="compact"] #journal-input { height: 88px !important; max-height: 88px; }
+#compose-bar .capture-queued.hidden { display: none; }
+#compose-bar[data-size="writing"] .compose-top, #compose-bar[data-size="full"] .compose-top,
+#compose-bar .composer-heading, #compose-bar .composer-footer { flex-shrink: 0; }
+@media (max-width: 768px) {
+  #compose-bar[data-size="compact"] #journal-input { height: 72px !important; max-height: 72px; }
+}

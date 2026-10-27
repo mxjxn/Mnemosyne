@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <meta name="version" content="0.0.43">
+  <meta name="version" content="0.0.45">
   <meta name="theme-color" content="#f5f5f7">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -12,7 +12,7 @@
   <link rel="manifest" href="/manifest.json">
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
   <link rel="icon" type="image/png" href="/icons/favicon-32.png">
-  <link rel="stylesheet" href="/style.css?v=0.0.43">
+  <link rel="stylesheet" href="/style.css?v=0.0.45">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
@@ -59,8 +59,15 @@
 </div>
 
 <!-- Fixed bottom compose bar -->
-<div id="compose-bar">
+<div id="compose-bar" data-block-type="note">
   <div class="compose-inner">
+    <div class="composer-heading">
+      <label for="journal-input" id="composer-label">Write in today’s journal</label>
+      <div class="composer-size-controls">
+        <button id="composer-collapse" aria-label="Collapse writing panel" hidden>Done</button>
+        <button id="composer-expand" aria-label="Expand to full screen">⤢ <span>Expand</span></button>
+      </div>
+    </div>
     <div class="compose-top">
       <div class="write-toggle">
         <button class="write-pill active" data-mode="journal" id="pill-journal">Journal</button>
@@ -76,10 +83,12 @@
     <div class="compose-bottom">
       <input type="text" id="write-title" class="write-title-input" placeholder="Title or #tags (optional)…" autocomplete="off" tabindex="2">
       <div class="compose-textarea-wrap">
-        <textarea id="journal-input" placeholder="Write something…" rows="1" tabindex="1"></textarea>
-        <button id="journal-submit" aria-label="Send">↑</button>
+        <textarea id="journal-input" aria-label="Block content" placeholder="Write in today’s journal…" rows="3" tabindex="1"></textarea>
+        <button id="journal-submit" aria-label="Save block">Save ↑</button>
       </div>
     </div>
+    <div class="composer-footer"><span id="capture-status" role="status" aria-live="polite">Enter for a new line · ⌘/Ctrl + Enter to save</span></div>
+    <div id="capture-queued" class="capture-queued hidden"></div>
   </div>
 </div>
 
@@ -94,7 +103,8 @@
   <button class="ctx-menu-item" id="blk-ctx-edit" data-action="edit">✏️ Edit block</button>
   <button class="ctx-menu-item" id="blk-ctx-indent" data-action="indent">→ Indent</button>
   <button class="ctx-menu-item" id="blk-ctx-outdent" data-action="outdent">← Outdent</button>
-  <button class="ctx-menu-item" id="blk-ctx-add" data-action="add">+ Add block below</button>
+  <button class="ctx-menu-item" id="blk-ctx-add" data-action="add">+ New block</button>
+  <button class="ctx-menu-item" id="blk-ctx-child">↳ New sub-block</button>
   <button class="ctx-menu-item ctx-menu-item-danger" id="blk-ctx-delete" data-action="delete">✕ Delete block</button>
 </div>
 
@@ -138,7 +148,7 @@
   </div>
 </div>
 
-<script src="/app.js?v=0.0.43"></script>
+<script src="/app.js?v=0.0.45"></script>
 <script>
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js');
