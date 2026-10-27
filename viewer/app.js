@@ -3108,7 +3108,7 @@ function runForceGraph(canvas, data) {
 // Timestamped capture entries retain the existing capture format and queue.
 // ═══════════════════════════════════════════════════════════════
 
-const CAPTURE_TAG = ' #capture';              // '' to disable tagging
+const CAPTURE_TAG = '';                       // never auto-tag captures
 const CAPTURE_DRAFT_KEY = 'capture-draft';
 const CAPTURE_QUEUE_KEY = 'capture-queue';
 
