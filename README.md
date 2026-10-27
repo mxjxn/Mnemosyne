@@ -49,6 +49,17 @@ The installer asks where your graph lives, which port to run logseqd on, headles
 
 **Requirements:** [Babashka](https://babashka.org) · `inotify-tools` (`apt`/`brew`) · PM2 (recommended) · a Logseq graph directory. Any static file server + reverse proxy in front (Caddy configs live in the skills).
 
+## Hermes Desktop plugin
+
+Open your server graph inside Hermes Desktop: a Notes workspace, a companion
+pane beside chat, journal capture, block editing, and **Discuss with Hermes**.
+The plugin connects through your selected gateway and keeps using your existing
+server graph and GitHub sync.
+
+See [installation and usage](docs/hermes-desktop.md). The Desktop frontend and
+VPS backend must both be installed/enabled. Block editing requires the pinned
+logseqd revision included here.
+
 ## Hermes skills
 
 Three focused skills for [Hermes Agent](https://hermes-agent.nousresearch.com), each independently useful:
