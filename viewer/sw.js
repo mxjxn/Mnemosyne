@@ -1,4 +1,4 @@
-const CACHE = 'notes-shell-v42';
+const CACHE = 'notes-shell-v44';
 const SHELL = [
   '/',
   '/index.html',
@@ -24,6 +24,22 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
+  // App navigations (incl. query-param launches like /?capture=1):
+  // network-first so deploys reach users immediately, cached shell as
+  // offline fallback. A bare caches.match() misses precached '/' when
+  // the URL carries a query string, so look up '/' for navigations.
+  if (e.request.mode === 'navigate') {
+    e.respondWith(
+      fetch(e.request)
+        .then((res) => {
+          const clone = res.clone();
+          caches.open(CACHE).then((cache) => cache.put('/', clone));
+          return res;
+        })
+        .catch(() => caches.match('/'))
+    );
+    return;
+  }
   // API calls: network-first (always fresh data)
   if (e.request.url.includes('/api/')) {
     e.respondWith(

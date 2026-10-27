@@ -1866,3 +1866,69 @@ hr {
 }
 .lib-letter:first-child { margin-top: 4px; }
 .lib-letter-n { color: var(--text-faint); font-weight: 400; font-size: 11px; margin-left: 6px; }
+
+/* ═══ Quick Capture (/capture) ═══════════════════════════════ */
+.capture-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  padding: max(1rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom));
+}
+.capture-head { display: flex; align-items: center; gap: .75rem; padding-bottom: .75rem; }
+.capture-back { font-size: 1.4rem; color: var(--text-dim); text-decoration: none; padding: .25rem .6rem .25rem 0; }
+.capture-title { font-weight: 600; letter-spacing: .02em; }
+.capture-clock { margin-left: auto; color: var(--text-dim); font-variant-numeric: tabular-nums; font-size: .85rem; }
+.capture-stage { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.capture-input {
+  flex: 1;
+  width: 100%;
+  resize: none;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-alt);
+  color: var(--text);
+  font: inherit;
+  font-size: 1.15rem;
+  line-height: 1.5;
+  padding: 1rem;
+}
+.capture-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.capture-foot { display: flex; align-items: center; gap: 1rem; padding-top: .75rem; }
+.capture-status { color: var(--text-dim); font-size: .9rem; min-height: 1.2em; }
+.capture-send {
+  margin-left: auto;
+  border: 0;
+  border-radius: 12px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  font-size: 1.05rem;
+  padding: .9rem 1.6rem;
+  min-height: 48px;
+  min-width: 112px;
+}
+.capture-send:active { transform: scale(.97); }
+.capture-queued {
+  margin-top: .75rem;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: .6rem .8rem;
+  font-size: .85rem;
+  color: var(--text-dim);
+}
+.capture-queued-head { font-weight: 600; margin-bottom: .3rem; }
+.capture-queued-item { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.capture-flush {
+  margin-top: .5rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  padding: .4rem .8rem;
+  font: inherit;
+  font-size: .85rem;
+}

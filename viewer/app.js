@@ -2216,6 +2216,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (route.type === 'view') {
       if (route.name === 'library') loadLibraryView();
       else if (route.name === 'graph') loadGraphView();
+      else if (route.name === 'capture') loadCaptureView();
       else loadDefaultPage();
     } else if (route.type === 'tag') {
       loadTagPage(route.name);
@@ -2223,6 +2224,24 @@ document.addEventListener('DOMContentLoaded', () => {
       loadPage(route.name, {fromHash: true});
     }
   });
+
+  // Manifest shortcut / home-screen launch: /?capture=1 opens the capture
+  // view. Query param (not hash) so a warm app does a real navigation —
+  // hash-only shortcut URLs get treated as same-document and land on root.
+  const launchParams = new URLSearchParams(location.search);
+  if (launchParams.get('capture') === '1') {
+    history.replaceState(null, '', location.pathname);
+    loadCaptureView();
+    return;
+  }
+
+  // Share-target landing: Android share arrives as /?title=…&text=…&url=…
+  const shareParams = new URLSearchParams(location.search);
+  if (shareParams.get('text') || shareParams.get('title') || shareParams.get('url')) {
+    history.replaceState(null, '', location.pathname);
+    loadCaptureView(captureSharePrefill(shareParams));
+    return;
+  }
 
   // Load page from URL hash, or default to journal.
   // Rule: a fresh visit to your-domain.com (no hash, or typed URL) → journal.
@@ -2237,6 +2256,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (route.type === 'view') {
       if (route.name === 'library') loadLibraryView();
       else if (route.name === 'graph') loadGraphView();
+      else if (route.name === 'capture') loadCaptureView();
       else loadDefaultPage();
     } else if (route.type === 'tag') {
       loadTagPage(route.name);
@@ -3014,4 +3034,172 @@ function runForceGraph(canvas, data) {
     scale = ns;
     requestDraw();
   }, { passive: false });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ─── Quick Capture (/capture) ─────────────────────────────────
+// Zero-chrome capture surface for mobile dictation. Appends
+// timestamped blocks to today's journal via POST /append
+// (:journal true). Self-contained — runs no other view code.
+// ═══════════════════════════════════════════════════════════════
+
+const CAPTURE_TAG = ' #capture';              // '' to disable tagging
+const CAPTURE_DRAFT_KEY = 'capture-draft';
+const CAPTURE_QUEUE_KEY = 'capture-queue';
+
+function captureTimeLabel(d = new Date()) {
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function captureSharePrefill(sp) {
+  // Android share_target lands as ?title=…&text=…&url=…
+  const url = sp.get('url');
+  const title = sp.get('title');
+  const text = sp.get('text');
+  const parts = [];
+  if (url) parts.push(title ? `[${title}](${url})` : url);
+  if (text) parts.push(text);
+  else if (title && !url) parts.push(title);
+  return parts.join('\n');
+}
+
+async function loadCaptureView(prefillText = null) {
+  currentPage = null;
+  const content = document.getElementById('content');
+  const composeBar = document.getElementById('compose-bar');
+  if (composeBar) composeBar.classList.add('hidden');
+  const sidebar = document.getElementById('sidebar');
+  if (sidebar) sidebar.classList.remove('open');
+
+  content.innerHTML = `
+    <div class="capture-wrap">
+      <div class="capture-head">
+        <a href="#/" class="capture-back" aria-label="Back">←</a>
+        <span class="capture-title">Capture</span>
+        <span id="capture-clock" class="capture-clock">${captureTimeLabel()}</span>
+      </div>
+      <div class="capture-stage">
+        <textarea id="capture-input" class="capture-input" rows="5"
+          placeholder="Say it or type it…" autocomplete="off" autocapitalize="sentences"></textarea>
+        <div id="capture-queued" class="capture-queued hidden"></div>
+      </div>
+      <div class="capture-foot">
+        <span id="capture-status" class="capture-status"></span>
+        <button id="capture-send" class="capture-send">Send ↑</button>
+      </div>
+    </div>`;
+
+  const input = document.getElementById('capture-input');
+
+  if (prefillText) {
+    input.value = prefillText;
+  } else {
+    const draft = localStorage.getItem(CAPTURE_DRAFT_KEY);
+    if (draft) input.value = draft;
+  }
+  renderCaptureQueue();
+
+  let draftTimer = null;
+  input.addEventListener('input', () => {
+    clearTimeout(draftTimer);
+    draftTimer = setTimeout(() => {
+      if (input.value.trim()) localStorage.setItem(CAPTURE_DRAFT_KEY, input.value);
+      else localStorage.removeItem(CAPTURE_DRAFT_KEY);
+    }, 300);
+  });
+
+  // Desktop convenience: Cmd/Ctrl+Enter sends. Enter stays newline (dictation-safe).
+  input.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault();
+      sendCapture();
+    }
+  });
+
+  document.getElementById('capture-send').addEventListener('click', sendCapture);
+  window.addEventListener('online', flushCaptureQueue);
+
+  // Focus fast — Android won't auto-open the keyboard, but focus must be
+  // instant so the mic tap on Gboard lands in the textarea immediately.
+  requestAnimationFrame(() => input.focus());
+}
+
+function renderCaptureQueue() {
+  const el = document.getElementById('capture-queued');
+  if (!el) return;
+  const q = readCaptureQueue();
+  if (q.length === 0) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+  el.classList.remove('hidden');
+  el.innerHTML = `<div class="capture-queued-head">Queued offline (${q.length})</div>` +
+    q.map(item => {
+      const t = captureTimeLabel(new Date(item.at));
+      const preview = item.text.length > 60 ? item.text.slice(0, 60) + '…' : item.text;
+      return `<div class="capture-queued-item">${escapeHtml(t)} — ${escapeHtml(preview)}</div>`;
+    }).join('') +
+    `<button id="capture-flush" class="capture-flush">Send queued</button>`;
+  const btn = document.getElementById('capture-flush');
+  if (btn) btn.addEventListener('click', flushCaptureQueue);
+}
+
+function readCaptureQueue() {
+  try { return JSON.parse(localStorage.getItem(CAPTURE_QUEUE_KEY)) || []; }
+  catch { return []; }
+}
+
+function writeCaptureQueue(q) {
+  if (q.length === 0) localStorage.removeItem(CAPTURE_QUEUE_KEY);
+  else localStorage.setItem(CAPTURE_QUEUE_KEY, JSON.stringify(q));
+}
+
+async function sendCapture() {
+  const input = document.getElementById('capture-input');
+  const status = document.getElementById('capture-status');
+  if (!input) return;
+  const text = input.value.trim();
+  if (!text) return;
+
+  const content = `${captureTimeLabel()} — ${text}${CAPTURE_TAG}`;
+  try {
+    await apiPost('/append', '{:content "' + escapeEdn(content) + '" :journal true}');
+    localStorage.removeItem(CAPTURE_DRAFT_KEY);
+    input.value = '';
+    input.style.height = 'auto';
+    if (status) {
+      status.textContent = `Saved ✓ ${captureTimeLabel()}`;
+      setTimeout(() => { if (status) status.textContent = ''; }, 2500);
+    }
+    input.focus();
+  } catch (e) {
+    // Offline / server unreachable — queue with the CAPTURE time, not send time
+    const q = readCaptureQueue();
+    q.push({ at: new Date().toISOString(), text });
+    writeCaptureQueue(q);
+    localStorage.removeItem(CAPTURE_DRAFT_KEY);
+    input.value = '';
+    if (status) status.textContent = 'Offline — queued';
+    renderCaptureQueue();
+    input.focus();
+  }
+}
+
+async function flushCaptureQueue() {
+  const q = readCaptureQueue();
+  if (q.length === 0) return;
+  const remaining = [];
+  for (const item of q) {
+    const when = captureTimeLabel(new Date(item.at));
+    const content = `${when} — ${item.text}${CAPTURE_TAG}`;
+    try {
+      await apiPost('/append', '{:content "' + escapeEdn(content) + '" :journal true}');
+    } catch {
+      remaining.push(item);
+    }
+  }
+  writeCaptureQueue(remaining);
+  renderCaptureQueue();
+  const status = document.getElementById('capture-status');
+  if (status && remaining.length === 0) {
+    status.textContent = `Queued sent ✓ (${q.length})`;
+    setTimeout(() => { if (status) status.textContent = ''; }, 2500);
+  }
 }
