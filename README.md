@@ -1,4 +1,4 @@
-# A shared notes workspace
+# Mnemosyne
 
 **Capture, connect, discuss, and publish—with your agent.**
 
@@ -19,7 +19,8 @@ The web editor works without either desktop application installed.
 2. **Connect.** Organize thoughts into blocks and sub-blocks, link pages with
    `[[references]]`, and explore your notes through the library and graph views.
 3. **Discuss.** In Hermes Desktop, keep a note beside a conversation and add a
-   selected block to the chat draft. Review it before sending.
+   saved block reference to the chat draft. Discuss it, ask for an edit suggestion,
+   and review the original and proposed text before applying it.
 4. **Keep.** Your agent can read and write the same graph through files or the
    API. Research, journal entries, and scheduled reports become durable notes.
 5. **Publish.** Mark a page public to make it available through the read-only
@@ -30,7 +31,7 @@ The web editor works without either desktop application installed.
 | Interface | What it does | Current status |
 |---|---|---|
 | **Private web editor** | Journals, expandable capture, block editing, page references, search, library, and graph browsing | Used in the maintainer's deployment; actively improving |
-| **Hermes Desktop plugin** | Notes workspace and side pane, journal capture, page browsing/search, block editing, and discussion drafts | Implemented and tested with an SDK browser harness and real backend; native Desktop/VPS acceptance remains |
+| **Hermes Desktop plugin** | Notes workspace and side pane, journal capture, page browsing/search, block editing, native context references, and edit suggestion review | Implemented and tested with an SDK browser harness and real backend; native Desktop/VPS acceptance remains |
 | **Public reader** | Read-only pages, search, curated ordering, and dated series | Used in the maintainer's deployment; deployment still contains personal configuration |
 | **Graph API — logseqd** | Read/write operations, incremental indexing, properties, and Datalog queries | Included as a pinned submodule |
 | **Agent skills** | Graph conventions, publishing helpers, deployment notes, and scheduled workflow examples | Adapt to your graph and installed agent version |
@@ -69,8 +70,8 @@ it does not provide a complete automatic commit/push service for every install.
 Clone the repository with its pinned backend:
 
 ```sh
-git clone --recurse-submodules https://github.com/mxjxn/hermes-logseq.git
-cd hermes-logseq
+git clone --recurse-submodules https://github.com/mxjxn/Mnemosyne.git
+cd Mnemosyne
 ```
 
 Choose the part you want to use:

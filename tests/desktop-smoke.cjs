@@ -24,6 +24,7 @@ async function main() {
   const writes = [];
   let failWrite = false;
   let delayWrite = false;
+  const proposals = new Map();
   let revision = 1;
   const today = '2026_10_27';
   const server = http.createServer(async (req, res) => {
@@ -45,7 +46,14 @@ async function main() {
       const body = JSON.parse(raw);
       writes.push({ connection, route, body });
       if (delayWrite) await new Promise(resolve => setTimeout(resolve, 600));
-      if (failWrite) { status = 409; data = { detail: 'The note changed elsewhere. Your draft is safe.' }; }
+      if (route === '/references') { data = { id: 'a'.repeat(32), expected_content: body.expected_content }; writes.pop(); }
+      else if (route.startsWith('/proposals/')) {
+        const item = proposals.get(segments[1]);
+        item.state = segments[2] === 'apply' ? 'applied' : 'rejected';
+        if (item.state === 'applied') graphs[connection][0]['block/content'] = item.content;
+        data = segments[2] === 'apply' ? { saved: true, page: makePage() } : item;
+      }
+      else if (failWrite) { status = 409; data = { detail: 'The note changed elsewhere. Your draft is safe.' }; }
       else {
         if (route === '/blocks/insert') graphs[connection].push({
           'block/id': connection + '-insert-' + writes.length, 'block/content': body.content,
@@ -58,6 +66,8 @@ async function main() {
         data = { saved: true, page: makePage(), refresh_required: false };
       }
     } else if (route === '/status') data = { connected: true, today, graph_id: connection };
+    else if (route === '/proposals') data = { proposals: [...proposals.values()] };
+    else if (route.startsWith('/proposals/')) data = proposals.get(segments[1]) || {};
     else if (route === '/pages') data = { pages: [{ 'page/title': today }, { 'page/title': 'Projects' }] };
     else if (route === '/page') data = makePage();
     else if (route === '/search') data = { results: [] };
@@ -124,7 +134,25 @@ async function main() {
     await pane.getByRole('button', { name: 'Add to chat draft', exact: true }).click();
     const prompt = await page.getByLabel('Hermes chat draft').inputValue();
     assert(prompt.startsWith('My existing question'));
-    assert(prompt.includes('A thought from the VPS'));
+    assert(prompt.includes('@mnemosyne:' + 'a'.repeat(32)));
+    assert(!prompt.includes('A thought from the VPS'));
+
+    // The same server-stored proposal renders in chat and in Notes. Applying
+    // the transcript card refreshes Notes without inserting assistant prose.
+    const proposalId = 'b'.repeat(32);
+    proposals.set(proposalId, { id: proposalId, state: 'pending', page: today, expected_content: 'A thought from the VPS', content: 'An improved thought', reason: 'Clarify the idea' });
+    await page.evaluate(id => window.harness.showDirective(id), proposalId);
+    await workspace.getByRole('button', { name: 'Apply edit' }).waitFor();
+    await page.evaluate(() => window.harness.showDirective('invalid'));
+    await workspace.locator('.ln-proposal').waitFor({ state: 'detached' });
+    await page.evaluate(id => window.harness.showDirective(id), proposalId);
+    await workspace.getByRole('button', { name: 'Apply edit' }).waitFor();
+    await workspace.getByText('A thought from the VPS', { exact: true }).waitFor();
+    if (process.env.REVIEW_SCREENSHOT_PATH) await page.screenshot({ path: process.env.REVIEW_SCREENSHOT_PATH });
+    await workspace.getByRole('button', { name: 'Apply edit' }).click();
+    await workspace.getByText('Applied to your note', { exact: true }).waitFor();
+    await pane.locator('.ln-block-text').getByText('An improved thought', { exact: true }).waitFor();
+    assert.equal(writes.filter(write => write.route === '/proposals/' + proposalId + '/apply').length, 1);
 
     // An accepted write stays with its original gateway after a same-profile swap.
     delayWrite = true;
@@ -138,7 +166,7 @@ async function main() {
     assert.equal(await pane.getByLabel('Journal entry').inputValue(), '');
     assert.deepEqual(errors, []);
     if (process.env.SCREENSHOT_PATH) await page.screenshot({ path: process.env.SCREENSHOT_PATH });
-    console.log('Desktop UI: shared drafts, resize, gateway isolation, shared save lock, insertion retry, nested blocks, safe chat attachment, and in-flight gateway switching passed.');
+    console.log('Desktop UI: shared drafts, resize, gateway isolation, shared save lock, insertion retry, nested blocks, compact references, inline edit review, and in-flight gateway switching passed.');
   } finally { if (browser) await browser.close(); server.close(); }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

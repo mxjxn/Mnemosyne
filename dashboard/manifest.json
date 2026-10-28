@@ -1,7 +1,7 @@
 {
   "name": "hermes-logseq",
   "label": "Logseq Notes",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "api": "plugin_api.py",
   "entry": "backend-only.js",
   "tab": {"hidden": true},

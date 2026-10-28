@@ -6,6 +6,7 @@ filesystem path, Datalog query, or arbitrary HTTP method comes from the renderer
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -222,4 +223,132 @@ async def insert(edit: BlockInsert):
             raise HTTPException(422, "This block is already at the maximum supported depth.")
         await _upstream("POST", "/insert-block", {"page": _title(edit.page), "content": _content(edit.content),
                                                    "level": level, "after-block-id": target["block/id"]})
+        return await _saved(edit.page)
+
+# Snapshots and proposals live on the gateway, beside the active Hermes profile.
+# SQLite state transitions prevent a second process/request applying twice.
+def _data_dir():
+    from pathlib import Path
+    from hermes_constants import get_hermes_home
+    return Path(get_hermes_home()) / 'plugin-data' / 'hermes-logseq'
+
+
+@contextmanager
+def _store():
+    import sqlite3
+    directory = _data_dir()
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    db = sqlite3.connect(directory / 'notes.sqlite3', timeout=10)
+    db.row_factory = sqlite3.Row
+    db.execute('CREATE TABLE IF NOT EXISTS records (id TEXT PRIMARY KEY, graph TEXT NOT NULL, kind TEXT NOT NULL, state TEXT NOT NULL, data TEXT NOT NULL, created INTEGER NOT NULL)')
+    try:
+        with db:
+            yield db
+    finally:
+        db.close()
+
+
+def _graph():
+    return hashlib.sha256(_base_url().encode()).hexdigest()
+
+
+def _record(identity, kind):
+    if not re.fullmatch(r'[0-9a-f]{32}', identity):
+        raise HTTPException(404, 'Note reference or proposal not found on this graph.')
+    with _store() as db:
+        row = db.execute('SELECT * FROM records WHERE id=? AND graph=? AND kind=?', (identity, _graph(), kind)).fetchone()
+    if row is None:
+        raise HTTPException(404, 'Note reference or proposal not found on this graph.')
+    return {**json.loads(row['data']), 'id': row['id'], 'state': row['state']}
+
+
+def _put(kind, data):
+    import time
+    import uuid
+    identity = uuid.uuid4().hex
+    with _store() as db:
+        db.execute('INSERT INTO records VALUES (?,?,?,?,?,?)', (identity, _graph(), kind, 'pending', json.dumps(data, ensure_ascii=False), time.time_ns()))
+    return _record(identity, kind)
+
+
+def _transition(identity, before, after):
+    with _store() as db:
+        changed = db.execute('UPDATE records SET state=? WHERE id=? AND graph=? AND kind=? AND state=?', (after, identity, _graph(), 'proposal', before)).rowcount
+    if not changed:
+        raise HTTPException(409, 'This suggestion has already been reviewed or is being applied. Refresh to see its status.')
+
+
+class ReferenceRequest(BaseModel):
+    page: str = Field(min_length=1, max_length=512)
+    revision: str = Field(min_length=64, max_length=64)
+    block_path: str = Field(min_length=1, max_length=512, pattern=r'^\d+(?:/\d+)*$')
+    expected_content: str = Field(max_length=64000)
+
+
+class ProposalRequest(BaseModel):
+    reference: str = Field(pattern=r'^[0-9a-f]{32}$')
+    content: str = Field(min_length=1, max_length=64000)
+    reason: str = Field(default='', max_length=2000)
+
+
+@router.post('/references')
+async def create_reference(request: ReferenceRequest):
+    # Validate against the displayed revision rather than silently attaching a
+    # newer block at the same position after somebody edits the graph.
+    await _target(BlockEdit(**request.model_dump(), content=request.expected_content or ' '))
+    return _put('reference', request.model_dump())
+
+
+@router.get('/references/{identity}')
+async def reference(identity: str):
+    return _record(identity, 'reference')
+
+
+@router.get('/proposals')
+async def proposals(page: str = Query(min_length=1, max_length=512)):
+    with _store() as db:
+        rows = db.execute("SELECT id FROM records WHERE graph=? AND kind='proposal' AND json_extract(data, '$.page')=? ORDER BY created DESC LIMIT 50", (_graph(), page)).fetchall()
+    items = [_record(row['id'], 'proposal') for row in rows]
+    return {'proposals': [item for item in items if item['page'] == page][:50]}
+
+
+@router.get('/proposals/{identity}')
+async def proposal(identity: str):
+    return _record(identity, 'proposal')
+
+
+async def propose(request: ProposalRequest):
+    source = _record(request.reference, 'reference')
+    edit = BlockEdit(page=source['page'], revision=source['revision'], block_path=source['block_path'], expected_content=source['expected_content'], content=_content(request.content))
+    await _target(edit)
+    return _put('proposal', {**edit.model_dump(), 'reference': request.reference, 'reason': request.reason})
+
+
+@router.post('/proposals/{identity}/reject')
+async def reject_proposal(identity: str):
+    _record(identity, 'proposal')
+    _transition(identity, 'pending', 'rejected')
+    return _record(identity, 'proposal')
+
+
+@router.post('/proposals/{identity}/apply')
+async def apply_proposal(identity: str):
+    async with _write_lock:
+        item = _record(identity, 'proposal')
+        if item['state'] == 'applied':
+            return await _saved(item['page'])
+        if item['state'] != 'pending':
+            raise HTTPException(409, 'This suggestion has already been reviewed or its write is unconfirmed. Refresh Notes.')
+        edit = BlockEdit(**{key: item[key] for key in BlockEdit.model_fields})
+        await _target(edit)
+        _transition(identity, 'pending', 'applying')
+        try:
+            target = await _target(edit)
+            await _upstream('POST', '/update-block', {'id': target['block/id'], 'content': edit.content})
+        except Exception:
+            # A disconnected response might still have reached logseqd. Never
+            # offer another Apply for an outcome we cannot prove.
+            _transition(identity, 'applying', 'uncertain')
+            raise
+        _transition(identity, 'applying', 'applied')
         return await _saved(edit.page)

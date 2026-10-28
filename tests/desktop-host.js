@@ -1,10 +1,11 @@
 // Browser-only SDK contract harness. No credentials or Hermes state are used.
 import React from 'react';
 
+export const TRANSCRIPT_DIRECTIVE_AREA = 'transcript.directive';
 export const ROUTES_AREA = 'routes';
 export const SIDEBAR_NAV_AREA = 'sidebar.nav';
 const listeners = new Set();
-const environment = { connection: 'vps-a', epoch: 0, mode: 'workspace', chat: '', mismatch: false };
+const environment = { connection: 'vps-a', epoch: 0, mode: 'workspace', chat: '', mismatch: false, directive: null };
 let redraw = () => {};
 export const gatewayActivationEpoch = () => environment.epoch;
 export const host = {
@@ -51,6 +52,7 @@ export function mountHarness(plugin, createRoot) {
     switchGateway() { environment.connection = environment.connection === 'vps-a' ? 'vps-b' : 'vps-a'; environment.epoch++; redraw(); },
     mismatch(value) { environment.mismatch = value; },
     setChat(text) { environment.chat = text; redraw(); },
+    showDirective(id) { environment.directive = id; redraw(); },
     data,
   };
   const root = createRoot(document.getElementById('root'));
@@ -58,7 +60,8 @@ export function mountHarness(plugin, createRoot) {
     React.createElement('div', { style: { height: '100vh', display: 'flex', background: '#f8f8fb' } },
       React.createElement('main', { style: { flex: 1, minWidth: 0 }, 'data-testid': 'workspace' }, environment.mode === 'workspace' ? workspace.render() :
         React.createElement('div', { style: { padding: 24 } }, React.createElement('h2', null, 'Hermes conversation'),
-          React.createElement('textarea', { 'aria-label': 'Hermes chat draft', value: environment.chat, onChange: e => { environment.chat = e.target.value; redraw(); } }))),
+          React.createElement('textarea', { 'aria-label': 'Hermes chat draft', value: environment.chat, onChange: e => { environment.chat = e.target.value; redraw(); } }),
+          environment.directive && contributions.find(item => item.id === 'edit-review').data.render({ attrs: { id: environment.directive }, streaming: false }))),
       React.createElement('aside', { style: { width: 420, borderLeft: '1px solid #ddd' }, 'data-testid': 'pane' }, pane.render()))));
   redraw();
 }

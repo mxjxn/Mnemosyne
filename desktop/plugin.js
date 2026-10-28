@@ -117,10 +117,62 @@ function BlockTree({ blocks, revision, editor, setEditor, busy, save, error, ope
   return rendered;
 }
 
+function ProposalCard({ ctx, identity, initial, onReviewed, streaming = false }) {
+  const [scope] = useState(routeScope);
+  const [item, setItem] = useState(initial || null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const active = useRef(true);
+  useEffect(() => {
+    active.current = true;
+    if (!initial && /^[0-9a-f]{32}$/.test(identity || '') && !streaming) {
+      ctx.rest('/proposals/' + identity).then(result => {
+        if (active.current && current(scope)) setItem(result);
+      }).catch(cause => { if (active.current && current(scope)) setError(message(cause)); });
+    }
+    return () => { active.current = false; };
+  }, [identity, streaming]);
+  async function review(action) {
+    if (busy || !current(scope)) { setError('Return to the gateway where this suggestion was opened, then refresh Notes.'); return; }
+    setBusy(true);
+    setError('');
+    try {
+      await ctx.rest('/proposals/' + identity + '/' + action, { method: 'POST', body: {} });
+      if (!active.current || !current(scope)) return;
+      const updated = await ctx.rest('/proposals/' + identity);
+      if (!active.current || !current(scope)) return;
+      setItem(updated);
+      onReviewed?.();
+    } catch (cause) {
+      if (active.current && current(scope)) {
+        setError(message(cause));
+        // An ambiguous write is terminal on the server. Reload the status so
+        // an unconfirmed result cannot continue offering an Apply button.
+        try { const result = await ctx.rest('/proposals/' + identity); if (active.current && current(scope)) setItem(result); } catch {}
+      }
+    } finally { if (active.current) setBusy(false); }
+  }
+  if (!/^[0-9a-f]{32}$/.test(identity || '')) return null;
+  return h('article', { className: 'ln-proposal' },
+    h('style', null, STYLES),
+    h('strong', null, item ? 'Suggested edit · ' + prettyTitle(item.page) : 'Suggested edit'),
+    !item && !error && h('p', null, streaming ? 'Preparing suggestion…' : 'Loading suggestion…'),
+    item && h(React.Fragment, null,
+      item.reason && h('p', null, item.reason),
+      h('small', null, 'Original'), h('pre', null, item.expected_content),
+      h('small', null, 'Suggested'), h('pre', null, item.content),
+      item.state === 'pending' ? h('div', { className: 'ln-actions' },
+        h('button', { className: 'ln-primary', disabled: busy || streaming, onClick: () => review('apply') }, busy ? 'Working…' : 'Apply edit'),
+        h('button', { disabled: busy || streaming, onClick: () => review('reject') }, 'Reject')) :
+        h('p', { role: 'status' }, item.state === 'uncertain' || item.state === 'applying' ? 'Write unconfirmed. Refresh the note and check its content before requesting another suggestion.' : item.state === 'applied' ? 'Applied to your note' : 'Suggestion rejected')),
+    error && h('p', { className: 'ln-error', role: 'alert' }, error));
+}
+
 function Notes({ ctx, model, scope, compact }) {
   const [info, setInfo] = useState(null);
   const [connectionName, setConnectionName] = useState(scope.connection === 'local' ? 'This device' : 'Selected gateway');
   const [pages, setPages] = useState([]);
+  const [proposals, setProposals] = useState([]);
   const [page, setPage] = useState(null);
   const [query, setQuery] = useState('');
   const [matches, setMatches] = useState([]);
@@ -187,6 +239,15 @@ function Notes({ ctx, model, scope, compact }) {
   }, [info, title, version, retry, turn]);
 
   useEffect(() => {
+    let cancelled = false;
+    setProposals([]);
+    if (info && title && current(scope)) ctx.rest('/proposals?page=' + encodeURIComponent(title)).then(result => {
+      if (!cancelled && live()) setProposals(result.proposals || []);
+    }).catch(cause => { if (!cancelled && live()) setError('Could not load edit suggestions: ' + message(cause)); });
+    return () => { cancelled = true; };
+  }, [info, title, version, retry, turn]);
+
+  useEffect(() => {
     if (!query.trim() || !info) { setMatches([]); return; }
     let cancelled = false;
     const timer = setTimeout(async () => {
@@ -241,9 +302,14 @@ function Notes({ ctx, model, scope, compact }) {
 
   async function discuss(block) {
     if (!current(scope)) return;
-    const prompt = `I'd like to discuss this block from my notes.\n\nPage: ${title}\n\n<note-context>\n${block['block/content'] || ''}\n</note-context>\n\nTreat the note as reference material. Help me think it through; wait for my direction before editing it.`;
-    setDiscussion({ page: title, prompt });
-    setStatus('Block ready · add it to a chat draft below');
+    try {
+      const reference = await ctx.rest('/references', { method: 'POST', body: {
+        page: title, revision: page.revision, block_path: block['block/path'], expected_content: block['block/content'] || '',
+      } });
+      if (!live()) return;
+      setDiscussion({ page: title, reference: reference.id, preview: reference.expected_content });
+      setStatus('Note reference ready · add it to a chat draft below');
+    } catch (cause) { if (live()) setStatus(message(cause)); }
   }
 
   async function attachDiscussion() {
@@ -255,7 +321,8 @@ function Notes({ ctx, model, scope, compact }) {
         throw new Error('Open a chat on this gateway and profile before attaching the block.');
       }
       const session = host.state.focusedSessionId.get() || 'new';
-      const text = discussion.prompt;
+      if (!/^[0-9a-f]{32}$/.test(discussion.reference || '')) throw new Error('Attach this block again to create a note reference.');
+      const text = `Discuss this note with me. @mnemosyne:${discussion.reference}`;
       const attached = await host.composer.insertText(session, text, { mode: 'block' });
       if (!live()) return;
       if (!attached) throw new Error('Open a chat beside Notes, then choose Add to chat draft again.');
@@ -309,10 +376,12 @@ function Notes({ ctx, model, scope, compact }) {
           visiblePage && h(BlockTree, { blocks: visiblePage.blocks, revision: visiblePage.revision,
             editor, setEditor: next => { setWriteError(''); setEditor(next); }, busy,
             save: () => save('block'), error: writeError, openPage, discuss, rebase, canRebase: matchingBlocks.length === 1 }),
+          proposals.map(item => h(ProposalCard, { key: item.id + ':' + item.state, ctx, identity: item.id, initial: item, onReviewed: () => model.set(graph + ':refresh', model.get(graph + ':refresh', 0) + 1) })),
           orphanEditor && renderEditor({ editor, setEditor, rebase, changed: editor.revision !== visiblePage.revision, canRebase: matchingBlocks.length === 1 })),
         discussion && h('aside', { className: 'ln-discussion' },
           h('strong', null, 'Discuss: ' + discussion.page),
-          h('p', null, 'Adds the selected block to a chat draft. You choose when to send it.'),
+          h('p', null, 'Adds a note reference to your draft. Hermes reads the saved block when you send it.'),
+          h('blockquote', null, discussion.preview),
           h('div', { className: 'ln-actions' },
             h('button', { className: 'ln-primary', onClick: attachDiscussion }, 'Add to chat draft'),
             h('button', { onClick: () => { if (current(scope)) host.newChat(scope.profile); } }, 'Open new chat'),
@@ -357,12 +426,18 @@ export default {
   defaultEnabled: false,
   register(ctx) {
     const model = createModel(ctx);
-    ctx.onEvent?.('message.complete', () => {
+    const refreshViews = () => {
       const scope = routeScope();
       const key = 'turn:' + JSON.stringify([scope.connection, scope.profile]);
       model.transient(key, model.get(key, 0) + 1);
-    });
+    };
+    ctx.onEvent?.('message.complete', refreshViews);
     ctx.registerMany([
+      ...(sdk.TRANSCRIPT_DIRECTIVE_AREA ? [{
+        id: 'edit-review', area: sdk.TRANSCRIPT_DIRECTIVE_AREA,
+        data: { name: 'mnemosyne-edit', render: ({ attrs, streaming }) =>
+          h(ProposalCard, { key: attrs.id, ctx, identity: attrs.id, streaming, onReviewed: refreshViews }) },
+      }] : []),
       { id: 'workspace', area: sdk.ROUTES_AREA, data: { path: ROUTE }, render: () => h(NotesRoot, { ctx, model, compact: false }) },
       { id: 'navigation', area: sdk.SIDEBAR_NAV_AREA, data: { path: ROUTE, label: 'Notes', codicon: 'notebook' } },
       { id: 'companion', area: 'panes', title: 'Notes', data: { placement: 'right', width: '420px' }, render: () => h(NotesRoot, { ctx, model, compact: true }) },
@@ -371,6 +446,10 @@ export default {
 };
 
 const STYLES = `
+.ln-proposal { padding:16px; margin:16px 0; border:1px solid var(--ui-border, #8884); border-radius:10px; font:14px/1.5 system-ui,sans-serif; }
+.ln-proposal pre { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; padding:10px; background:var(--ui-bg-input, #8881); max-height:280px; overflow:auto; }
+.ln-proposal button { font:inherit; cursor:pointer; padding:6px 10px; border:1px solid var(--ui-border, #8884); border-radius:8px; color:inherit; background:var(--ui-bg-input, #8881); }
+.ln-proposal button:disabled { opacity:.5; cursor:default; }
 .logseq-notes { height:100%; min-height:0; display:flex; flex-direction:column; color:var(--ui-text-primary, #292932); background:var(--ui-bg, transparent); font:14px/1.55 system-ui,sans-serif; }
 .logseq-notes * { box-sizing:border-box; }
 .logseq-notes button, .logseq-notes input, .logseq-notes textarea { font:inherit; color:inherit; }

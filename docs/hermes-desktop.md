@@ -12,6 +12,8 @@ with your existing deployment; the plugin does not start another sync worker.
 - **Edit**, **New block**, and **New sub-block** actions, including nested blocks.
 - **Discuss with Hermes**: prepare a block for a conversation, then choose **Add to chat draft**.
   Existing chat text is preserved. The plugin never sends the message automatically.
+- Saved `@mnemosyne:` block references, resolved by the gateway when a message is sent.
+- Agent suggestions with original/suggested text and **Apply edit** / **Reject**, both in Notes and in supported chat transcripts.
 - Shared drafts between the workspace and pane, separated by gateway, profile, graph, and page.
 - A refresh after Hermes completes a message, plus a manual refresh button.
 
@@ -19,7 +21,7 @@ The native interface renders text, basic emphasis, code spans, HTTP(S) Markdown
 links, and clickable `[[page references]]`. The existing web app remains available
 for graph visualization, templates, and structured Event/Ask forms. This first
 version does not add a local graph, file sync, offline note browsing, automatic
-response publishing, or an agent edit-review workflow.
+response publishing, or suggestions that create/reorder entire block trees. Edit suggestions currently replace one referenced block at a time.
 
 ## How it connects
 
@@ -51,7 +53,7 @@ Install the package into the Hermes profile that owns the graph. After this
 change is merged to `main`, the standard installation is:
 
 ```sh
-hermes plugins install mxjxn/hermes-logseq --no-enable
+hermes plugins install mxjxn/Mnemosyne --no-enable
 hermes plugins enable hermes-logseq
 hermes gateway restart
 ```
@@ -80,11 +82,16 @@ The server installation cannot place files on your Mac. You need the Desktop
 half locally too, even when all notes and agent work run on the VPS.
 
 Use a current Hermes Desktop build that exposes gateway activation scopes,
-focused session owners, and the composer draft API. Older builds show an update
+focused session owners, and the composer draft API. The gateway must support
+`PluginContext.register_context_reference` and the `ContextReferenceProvider` API
+(`agent.context_references`). The plugin registers the `mnemosyne` prefix and
+the `mnemosyne_propose_edit` tool; it needs the gateway’s FastAPI/Pydantic runtime.
+Inline review cards additionally require `TRANSCRIPT_DIRECTIVE_AREA`; Notes
+remains the review surface when that Desktop extension is unavailable. Older builds show an update
 message rather than trying an unsafe fallback.
 
 In **Capabilities → Plugins → Install from Git**, install
-`mxjxn/hermes-logseq` with the **Desktop** component selected, then enable
+`mxjxn/Mnemosyne` with the **Desktop** component selected, then enable
 **Logseq Notes**. Alternatively, from a checkout containing this revision:
 
 ```sh
@@ -121,7 +128,50 @@ entry; appending through logseqd's journal endpoint targets today's journal.
 To discuss a block, choose **Discuss with Hermes**, then **Add to chat draft**.
 A conversation on the same gateway/profile must be open. From the full Notes
 workspace, **Open new chat** opens a conversation while the companion retains
-the prepared block. Review the draft and send it yourself.
+the prepared block. The draft contains a compact `@mnemosyne:…` token; it does
+not contain the block text. The SDK currently displays a text reference rather
+than a custom note attachment chip. Review the draft and send it yourself.
+
+The gateway expands the token into the saved block snapshot as attached context
+for Hermes. That snapshot preserves what you selected, even if the note later
+changes. Previously prepared text-based discussion drafts must be dismissed and
+reattached after updating to version 0.2.0.
+
+Ask Hermes to improve the referenced block. The provided `mnemosyne_propose_edit`
+tool stores a suggestion without modifying the graph. Hermes returns a
+`::mnemosyne-edit{id="…"}` directive on its own line, which supported Desktop
+builds render as a review card. The same suggestion appears below the note in
+**Notes** after the message completes; use **Refresh notes** if needed.
+Review **Original** and **Suggested**, then choose **Apply edit** or **Reject**.
+Apply updates that block and refreshes Notes. To revise the suggestion, discuss
+it further and ask for another proposal; reject the superseded one.
+
+Apply checks the original page revision and block content again. If the note
+changed, refresh and attach a fresh reference before asking for a new suggestion.
+An interrupted Apply is marked **Write unconfirmed** and cannot be applied again;
+check the actual note before continuing. The tool provides this review workflow;
+it does not remove the agent’s other existing file or shell capabilities.
+
+References and proposals are stored on the gateway in the active Hermes profile’s
+`plugin-data/hermes-logseq/notes.sqlite3`, separate from the Markdown graph. Back
+up this file if you want discussion references and review history to survive a
+profile rebuild. The selected gateway/profile and configured `LOGSEQD_URL` scope
+the records. Copying only the graph does not copy these saved references.
+
+## Updating an existing installation
+
+Update the server package checkout to this revision, including submodules, and
+restart the Hermes gateway for the graph-owning profile. Keep its existing
+`LOGSEQD_URL` and logseqd service configuration. In a linked checkout, that means
+pulling `main` and running `git submodule update --init --recursive` before the
+restart. Verify registration with `hermes plugins doctor hermes-logseq --ci`.
+The package should report version **0.2.0** and one registered tool.
+
+Update the Desktop component as well. For a manual installation, copy the new
+`desktop/plugin.js` to the existing Desktop plugin directory shown above; Desktop
+hot-reloads that file. An older server package cannot resolve the new references.
+Verify by attaching a block and asking Hermes for a suggested edit. The note
+should stay unchanged until you choose **Apply edit**.
 
 ## When notes change elsewhere
 
@@ -150,4 +200,4 @@ and the dependency's Clojure regression tests.
 
 A browser harness cannot verify every native layout/connection detail. The final
 acceptance step is to load the plugin in your installed Desktop build, select
-your VPS, and try journal capture, a nested block edit, and a discussion draft.
+your VPS, and try journal capture, a nested block edit, a reference-based discussion, and applying/rejecting a suggestion.

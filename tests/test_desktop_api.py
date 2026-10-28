@@ -3,6 +3,8 @@ import copy
 import importlib.util
 from pathlib import Path
 import unittest
+import tempfile
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
@@ -15,6 +17,9 @@ spec.loader.exec_module(api)
 
 class DesktopAPI(unittest.TestCase):
     def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.store = patch.object(api, '_data_dir', return_value=Path(self.directory.name))
+        self.store.start()
         self.blocks = [{'block/id': 'fresh-99', 'block/content': 'Original note',
                         'block/order': 0, 'block/level': 0, 'block/line': 3}]
         self.writes = []
@@ -37,6 +42,8 @@ class DesktopAPI(unittest.TestCase):
     def tearDown(self):
         self.client.close()
         self.upstream.stop()
+        self.store.stop()
+        self.directory.cleanup()
 
     def edit(self, **updates):
         body = {'page': 'A page', 'content': 'New text', 'revision': api._revision(self.blocks),
@@ -120,6 +127,78 @@ class DesktopAPI(unittest.TestCase):
         del self.blocks[0]['block/line']
         response = self.client.post('/blocks/update', json=self.edit())
         self.assertEqual(response.status_code, 409)
+        self.assertEqual(self.writes, [])
+
+    def make_reference(self):
+        request = self.edit()
+        request.pop('content')
+        response = self.client.post('/references', json=request)
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
+    def make_proposal(self):
+        ref = self.make_reference()
+        item = asyncio.run(api.propose(api.ProposalRequest(reference=ref['id'], content='Suggested Ω edit', reason='Clarify the thought')))
+        self.assertEqual(self.writes, [])
+        return item
+
+    def test_reference_is_durable_and_graph_scoped(self):
+        ref = self.make_reference()
+        self.blocks[0]['block/content'] = 'Changed later'
+        self.assertEqual(self.client.get('/references/' + ref['id']).json()['expected_content'], 'Original note')
+        with patch.dict('os.environ', {'LOGSEQD_URL': 'http://another-graph:8471'}):
+            self.assertEqual(self.client.get('/references/' + ref['id']).status_code, 404)
+        self.assertEqual(self.client.get('/references/not-an-id').status_code, 404)
+
+    def test_reference_refuses_stale_displayed_block(self):
+        request = self.edit()
+        request.pop('content')
+        self.blocks[0]['block/content'] = 'Changed later'
+        self.assertEqual(self.client.post('/references', json=request).status_code, 409)
+
+    def test_proposal_applies_only_once(self):
+        item = self.make_proposal()
+        self.assertEqual(self.client.get('/proposals?page=A%20page').json()['proposals'][0]['id'], item['id'])
+        self.assertEqual(self.client.get('/proposals?page=Other').json()['proposals'], [])
+        endpoint = '/proposals/' + item['id']
+        self.assertEqual(self.client.post(endpoint + '/apply').status_code, 200)
+        self.assertEqual(self.client.get(endpoint).json()['state'], 'applied')
+        self.assertEqual(self.client.post(endpoint + '/apply').status_code, 200)
+        self.assertEqual(len(self.writes), 1)
+        self.assertEqual(self.writes[0][1]['content'], 'Suggested Ω edit')
+
+    def test_changed_note_refuses_proposal_apply(self):
+        item = self.make_proposal()
+        self.blocks[0]['block/content'] = 'Changed by Telegram'
+        self.assertEqual(self.client.post('/proposals/' + item['id'] + '/apply').status_code, 409)
+        self.assertEqual(self.writes, [])
+
+    def test_rejected_proposal_never_writes(self):
+        item = self.make_proposal()
+        endpoint = '/proposals/' + item['id']
+        self.assertEqual(self.client.post(endpoint + '/reject').json()['state'], 'rejected')
+        self.assertEqual(self.client.post(endpoint + '/apply').status_code, 409)
+        self.assertEqual(self.writes, [])
+
+    def test_unconfirmed_write_cannot_be_retried(self):
+        item = self.make_proposal()
+        endpoint = '/proposals/' + item['id']
+        async def disconnected(*args):
+            raise api.HTTPException(503, 'Write could not be confirmed')
+        with patch.object(api, '_upstream', side_effect=disconnected):
+            # Only disconnect the write, after both revision checks pass.
+            with patch.object(api, '_target', return_value=self.blocks[0]):
+                self.assertEqual(self.client.post(endpoint + '/apply').status_code, 503)
+        self.assertEqual(self.client.get(endpoint).json()['state'], 'uncertain')
+        self.assertEqual(self.client.post(endpoint + '/apply').status_code, 409)
+        self.assertEqual(self.writes, [])
+
+    def test_propose_refuses_stale_reference(self):
+        ref = self.make_reference()
+        self.blocks[0]['block/content'] = 'Changed later'
+        with self.assertRaises(api.HTTPException) as raised:
+            asyncio.run(api.propose(api.ProposalRequest(reference=ref['id'], content='Suggestion')))
+        self.assertEqual(raised.exception.status_code, 409)
         self.assertEqual(self.writes, [])
 
 

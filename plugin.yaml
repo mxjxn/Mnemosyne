@@ -1,6 +1,7 @@
 name: hermes-logseq
-version: 0.1.0
+version: 0.2.0
 description: "Your Logseq graph inside Hermes Desktop: journal, notes, block editing, and discussion."
 author: mxjxn
-provides_tools: []
+provides_tools:
+  - mnemosyne_propose_edit
 provides_hooks: []
