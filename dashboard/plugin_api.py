@@ -13,6 +13,7 @@ import os
 import re
 from datetime import datetime
 from urllib.parse import quote, urlsplit
+from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
@@ -33,7 +34,10 @@ def _base_url() -> str:
 
 
 def _today() -> str:
-    return datetime.now().astimezone().strftime("%Y_%m_%d")
+    # Max is US Eastern; the server clock may or may not match (it was UTC
+    # until 2026-10-28, which made the desktop "Today" journal a day ahead
+    # after 8pm ET). Pin explicitly so this stays correct anywhere.
+    return datetime.now(ZoneInfo("America/New_York")).strftime("%Y_%m_%d")
 
 
 def _title(value: str) -> str:
