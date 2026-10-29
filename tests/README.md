@@ -30,8 +30,8 @@ npm test
 Alternatively set `CHROME_PATH` to an installed Chrome executable. The harness
 uses real React with a minimal SDK host and an isolated API fixture. It checks
 shared drafts, resize, gateway isolation, save locking across panes, inline
-insertion/retry, compact chat references without automatic submission, and
-inline proposal review. API checks include durable/scoped references, stale
+insertion/retry, hover-only block actions, and opening a fresh chat with a note
+chip while leaving the composer for the user. API checks include durable/scoped references, stale
 proposal refusal, rejection, idempotent Apply, and ambiguous-write handling.
 `SCREENSHOT_PATH` optionally saves a preview of the harness.
 

@@ -107,6 +107,7 @@ async function main() {
     assert.equal(writes.length, 1);
     delayWrite = false;
 
+    await workspace.locator('.ln-block').first().hover();
     await workspace.getByRole('button', { name: 'New sub-block', exact: false }).first().click();
     await workspace.getByLabel('Block text').fill('A nested thought');
     failWrite = true;
@@ -122,20 +123,42 @@ async function main() {
     await workspace.locator('.ln-children').getByText('A nested thought', { exact: true }).waitFor();
     assert(writes.at(-1).body.sub_block);
 
+    await page.mouse.move(1400, 900);
+    await page.evaluate(() => document.activeElement?.blur());
+    await page.waitForTimeout(200);
+    const firstBlock = workspace.locator('.ln-block').first();
+    const actionRow = firstBlock.locator(':scope > .ln-block-actions');
+    assert.equal(await actionRow.evaluate(el => getComputedStyle(el).opacity), '0');
+    assert(parseFloat(await actionRow.evaluate(el => getComputedStyle(el).maxHeight)) < 1);
+    await firstBlock.locator(':scope > .ln-block-text').hover();
+    await page.waitForTimeout(200);
+    assert.equal(await actionRow.evaluate(el => getComputedStyle(el).opacity), '1');
+    const childBlock = firstBlock.locator(':scope > .ln-children > .ln-block').first();
+    const childActions = childBlock.locator(':scope > .ln-block-actions');
+    await childBlock.locator(':scope > .ln-block-text').hover();
+    await page.waitForTimeout(200);
+    assert.equal(await actionRow.evaluate(el => getComputedStyle(el).opacity), '0');
+    assert.equal(await childActions.evaluate(el => getComputedStyle(el).opacity), '1');
+
+    // Discuss always starts a clean new chat, adds only the saved block chip,
+    // and leaves the composer ready for the user rather than sending a prompt.
+    await page.evaluate(() => window.harness.setChat('An existing chat draft that must not be reused'));
+    await firstBlock.locator(':scope > .ln-block-text').hover();
+    await page.waitForTimeout(200);
     await workspace.getByRole('button', { name: 'Discuss with Hermes', exact: true }).first().click();
-    await workspace.getByRole('button', { name: 'Add to chat draft', exact: true }).click();
-    await workspace.getByRole('status').getByText('Open a chat beside Notes', { exact: false }).waitFor();
-    await workspace.getByRole('button', { name: 'Open new chat', exact: true }).click();
-    await page.evaluate(() => window.harness.setChat('My existing question'));
-    await page.evaluate(() => window.harness.mismatch(true));
-    await pane.getByRole('button', { name: 'Add to chat draft', exact: true }).click();
-    assert.equal(await page.getByLabel('Hermes chat draft').inputValue(), 'My existing question');
-    await page.evaluate(() => window.harness.mismatch(false));
-    await pane.getByRole('button', { name: 'Add to chat draft', exact: true }).click();
-    const prompt = await page.getByLabel('Hermes chat draft').inputValue();
-    assert(prompt.startsWith('My existing question'));
-    assert(prompt.includes('@mnemosyne:' + 'a'.repeat(32)));
+    const chatDraft = page.getByLabel('Hermes chat draft');
+    await chatDraft.waitFor();
+    const prompt = await chatDraft.inputValue();
+    assert.equal(prompt, '@mnemosyne:' + 'a'.repeat(32));
+    assert(!prompt.includes('An existing chat draft'));
     assert(!prompt.includes('A thought from the VPS'));
+    assert.equal(await page.locator('.ln-discussion').count(), 0);
+    assert.equal(await page.evaluate(() => window.harness.newChats.length), 1);
+    assert.deepEqual(await page.evaluate(() => window.harness.insertions), [
+      { session: 'new', text: '@mnemosyne:' + 'a'.repeat(32), mode: 'block' },
+    ]);
+    await chatDraft.fill(prompt + '\\n\\nCan we discuss this?');
+    assert.equal(await chatDraft.inputValue(), prompt + '\\n\\nCan we discuss this?');
 
     // The same server-stored proposal renders in chat and in Notes. Applying
     // the transcript card refreshes Notes without inserting assistant prose.
@@ -166,7 +189,7 @@ async function main() {
     assert.equal(await pane.getByLabel('Journal entry').inputValue(), '');
     assert.deepEqual(errors, []);
     if (process.env.SCREENSHOT_PATH) await page.screenshot({ path: process.env.SCREENSHOT_PATH });
-    console.log('Desktop UI: shared drafts, resize, gateway isolation, shared save lock, insertion retry, nested blocks, compact references, inline edit review, and in-flight gateway switching passed.');
+    console.log('Desktop UI: shared drafts, resize, gateway isolation, save locking, nested blocks, hover-only actions, direct new-chat note chips, no auto-send, and inline edit review passed.');
   } finally { if (browser) await browser.close(); server.close(); }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

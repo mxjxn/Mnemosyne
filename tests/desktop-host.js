@@ -5,25 +5,42 @@ export const TRANSCRIPT_DIRECTIVE_AREA = 'transcript.directive';
 export const ROUTES_AREA = 'routes';
 export const SIDEBAR_NAV_AREA = 'sidebar.nav';
 const listeners = new Set();
-const environment = { connection: 'vps-a', epoch: 0, mode: 'workspace', chat: '', mismatch: false, directive: null };
+const environment = { connection: 'vps-a', epoch: 0, mode: 'workspace', chat: '', newDraft: false, newChats: [], insertions: [], mismatch: false, directive: null };
 let redraw = () => {};
 export const gatewayActivationEpoch = () => environment.epoch;
 export const host = {
   activeConnectionId: () => environment.connection,
   state: {
     profile: { get: () => 'default', subscribe: fn => { listeners.add(fn); fn(); return () => listeners.delete(fn); } },
+    activeSessionId: {
+      get: () => environment.newDraft ? null : 'session-' + environment.connection,
+      subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
+    },
     focusedSessionId: { get: () => 'session-' + environment.connection },
     focusedSessionOwner: { get: () => ({ connectionId: environment.mismatch ? 'wrong-gateway' : environment.connection, profile: 'default' }) },
   },
   composer: {
-    async insertText(session, text) {
-      if (environment.mode !== 'chat' || session !== 'session-' + environment.connection) return false;
+    async insertText(session, text, options = {}) {
+      if (environment.mode !== 'chat' || session !== 'new' || !environment.newDraft) return false;
+      environment.insertions.push({ session, text, mode: options.mode || 'block' });
       environment.chat += (environment.chat ? '\n\n' : '') + text;
       redraw();
       return true;
     },
   },
-  newChat() { environment.mode = 'chat'; redraw(); },
+  newChat(profile) {
+    environment.mode = 'chat';
+    environment.chat = '';
+    environment.newDraft = false;
+    environment.newChats.push(profile || 'default');
+    listeners.forEach(listener => listener());
+    redraw();
+    setTimeout(() => {
+      environment.newDraft = true;
+      listeners.forEach(listener => listener(null));
+      redraw();
+    }, 0);
+  },
 };
 export function mountHarness(plugin, createRoot) {
   const contributions = [];
@@ -53,6 +70,8 @@ export function mountHarness(plugin, createRoot) {
     mismatch(value) { environment.mismatch = value; },
     setChat(text) { environment.chat = text; redraw(); },
     showDirective(id) { environment.directive = id; redraw(); },
+    get newChats() { return [...environment.newChats]; },
+    get insertions() { return [...environment.insertions]; },
     data,
   };
   const root = createRoot(document.getElementById('root'));

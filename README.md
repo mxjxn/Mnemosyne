@@ -18,9 +18,9 @@ The web editor works without either desktop application installed.
    longer entry; the same draft stays with you.
 2. **Connect.** Organize thoughts into blocks and sub-blocks, link pages with
    `[[references]]`, and explore your notes through the library and graph views.
-3. **Discuss.** In Hermes Desktop, keep a note beside a conversation and add a
-   saved block reference to the chat draft. Discuss it, ask for an edit suggestion,
-   and review the original and proposed text before applying it.
+3. **Discuss.** Hover any block in Hermes Desktop and choose **Discuss with Hermes**.
+   It opens a fresh chat with that block's saved reference as a composer chip.
+   Type your question; nothing is sent automatically.
 4. **Keep.** Your agent can read and write the same graph through files or the
    API. Research, journal entries, and scheduled reports become durable notes.
 5. **Publish.** Mark a page public to make it available through the read-only

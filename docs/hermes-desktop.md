@@ -10,8 +10,7 @@ with your existing deployment; the plugin does not start another sync worker.
 - Today's journal, a page picker, page search, and new pages created by their first entry.
 - A journal composer that expands without losing its draft.
 - **Edit**, **New block**, and **New sub-block** actions, including nested blocks.
-- **Discuss with Hermes**: prepare a block for a conversation, then choose **Add to chat draft**.
-  Existing chat text is preserved. The plugin never sends the message automatically.
+- **Discuss with Hermes**: a block action opens a fresh chat with that saved reference as a composer chip. The composer is ready for your message; nothing is sent automatically.
 - Saved `@mnemosyne:` block references, resolved by the gateway when a message is sent.
 - Agent suggestions with original/suggested text and **Apply edit** / **Reject**, both in Notes and in supported chat transcripts.
 - Shared drafts between the workspace and pane, separated by gateway, profile, graph, and page.
@@ -125,17 +124,7 @@ For a new page, open **Pages**, enter its title, choose **New page**, and write
 its first block. To add to an older journal, choose **New block** on an existing
 entry; appending through logseqd's journal endpoint targets today's journal.
 
-To discuss a block, choose **Discuss with Hermes**, then **Add to chat draft**.
-A conversation on the same gateway/profile must be open. From the full Notes
-workspace, **Open new chat** opens a conversation while the companion retains
-the prepared block. The draft contains a compact `@mnemosyne:…` token; it does
-not contain the block text. The SDK currently displays a text reference rather
-than a custom note attachment chip. Review the draft and send it yourself.
-
-The gateway expands the token into the saved block snapshot as attached context
-for Hermes. That snapshot preserves what you selected, even if the note later
-changes. Previously prepared text-based discussion drafts must be dismissed and
-reattached after updating to version 0.2.0.
+To discuss a block, hover over it and choose **Discuss with Hermes**. Its actions stay out of the way until hover or keyboard focus. Hermes opens a fresh chat with the saved `@mnemosyne:…` reference as a composer chip; the chip resolves to the selected block snapshot when you send your own message. The composer is focused and waits for you—nothing is sent automatically.
 
 Ask Hermes to improve the referenced block. The provided `mnemosyne_propose_edit`
 tool stores a suggestion without modifying the graph. Hermes returns a

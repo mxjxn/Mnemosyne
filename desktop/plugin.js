@@ -196,7 +196,6 @@ function Notes({ ctx, model, scope, compact }) {
   const [editor, setEditor] = useStored(model, graph + ':editor:' + title, null);
   const [version] = useStored(model, graph + ':refresh', 0);
   const [turn] = useStored(model, 'turn:' + JSON.stringify([scope.connection, scope.profile]), 0);
-  const [discussion, setDiscussion] = useStored(model, graph + ':discussion', null);
 
   useEffect(() => {
     let cancelled = false;
@@ -307,28 +306,43 @@ function Notes({ ctx, model, scope, compact }) {
         page: title, revision: page.revision, block_path: block['block/path'], expected_content: block['block/content'] || '',
       } });
       if (!live()) return;
-      setDiscussion({ page: title, reference: reference.id, preview: reference.expected_content });
-      setStatus('Note reference ready · add it to a chat draft below');
-    } catch (cause) { if (live()) setStatus(message(cause)); }
-  }
-
-  async function attachDiscussion() {
-    if (!discussion || !current(scope)) return;
-    try {
-      const owner = host.state.focusedSessionOwner?.get();
-      const connection = host.activeConnectionId?.() || 'local';
-      if (!owner || owner.profile !== scope.profile || (owner.connectionId || 'local') !== connection) {
-        throw new Error('Open a chat on this gateway and profile before attaching the block.');
+      if (typeof host.newChat !== 'function' || !host.composer?.insertText || !host.state.activeSessionId) {
+        throw new Error('Update Hermes Desktop to open a new chat with a note reference.');
       }
-      const session = host.state.focusedSessionId.get() || 'new';
-      if (!/^[0-9a-f]{32}$/.test(discussion.reference || '')) throw new Error('Attach this block again to create a note reference.');
-      const text = `Discuss this note with me. @mnemosyne:${discussion.reference}`;
-      const attached = await host.composer.insertText(session, text, { mode: 'block' });
-      if (!live()) return;
-      if (!attached) throw new Error('Open a chat beside Notes, then choose Add to chat draft again.');
-      setDiscussion(null);
-      setStatus('Added to the chat draft · review it before sending');
-    } catch (cause) { if (live()) setStatus(message(cause)); }
+
+      host.newChat(scope.profile);
+      const activeSession = host.state.activeSessionId;
+      if (activeSession.get() !== null) {
+        const ready = await new Promise(resolve => {
+          let settled = false;
+          let dispose = () => {};
+          const finish = value => {
+            if (settled) return;
+            settled = true;
+            window.clearTimeout(timer);
+            dispose();
+            resolve(value);
+          };
+          const timer = window.setTimeout(() => finish(activeSession.get() === null), 5000);
+          dispose = activeSession.subscribe(value => { if (value === null) finish(true); });
+          if (settled) dispose();
+          else if (activeSession.get() === null) finish(true);
+        });
+        if (!ready) throw new Error('The new chat did not become ready. Try again.');
+      }
+      if (!current(scope)) return;
+
+      const inserted = await host.composer.insertText('new', `@mnemosyne:${reference.id}`, { mode: 'block' });
+      if (!current(scope)) return;
+      if (!inserted) throw new Error('The new chat opened, but the note chip could not be added. Try again.');
+      if (live()) setStatus('New chat ready · type your message');
+    } catch (cause) {
+      if (current(scope)) {
+        const detail = message(cause);
+        if (live()) setStatus(detail);
+        else host.notify?.({ kind: 'error', message: detail });
+      }
+    }
   }
 
   const visiblePage = page?.title === title ? page : null;
@@ -378,14 +392,6 @@ function Notes({ ctx, model, scope, compact }) {
             save: () => save('block'), error: writeError, openPage, discuss, rebase, canRebase: matchingBlocks.length === 1 }),
           proposals.map(item => h(ProposalCard, { key: item.id + ':' + item.state, ctx, identity: item.id, initial: item, onReviewed: () => model.set(graph + ':refresh', model.get(graph + ':refresh', 0) + 1) })),
           orphanEditor && renderEditor({ editor, setEditor, rebase, changed: editor.revision !== visiblePage.revision, canRebase: matchingBlocks.length === 1 })),
-        discussion && h('aside', { className: 'ln-discussion' },
-          h('strong', null, 'Discuss: ' + discussion.page),
-          h('p', null, 'Adds a note reference to your draft. Hermes reads the saved block when you send it.'),
-          h('blockquote', null, discussion.preview),
-          h('div', { className: 'ln-actions' },
-            h('button', { className: 'ln-primary', onClick: attachDiscussion }, 'Add to chat draft'),
-            h('button', { onClick: () => { if (current(scope)) host.newChat(scope.profile); } }, 'Open new chat'),
-            h('button', { onClick: () => setDiscussion(null) }, 'Dismiss'))),
         canAppend && info && h('form', { className: 'ln-composer ln-size-' + size, onSubmit: e => { e.preventDefault(); save('append'); } },
           h('div', { className: 'ln-composer-heading' },
             h('label', { htmlFor: 'ln-entry-' + (compact ? 'pane' : 'page') }, title === info.today ? 'Write in today’s journal' : 'New block on this page'),
@@ -477,7 +483,8 @@ const STYLES = `
 .ln-block { padding:12px 0; border-bottom:1px solid var(--ui-border, #8882); }
 .ln-block-text { white-space:pre-wrap; overflow-wrap:anywhere; }
 .ln-props { display:flex; flex-wrap:wrap; gap:8px; font-size:11px; color:var(--ui-text-secondary, #888); margin-top:6px; }
-.ln-block-actions { display:flex; flex-wrap:wrap; gap:4px; margin-top:8px; }
+.ln-block-actions { display:flex; flex-wrap:wrap; gap:4px; margin-top:0; max-height:0; opacity:0; overflow:hidden; pointer-events:none; transition:max-height .16s ease, opacity .12s ease, margin-top .16s ease; }
+.ln-block:hover:not(:has(.ln-block:hover)) > .ln-block-actions, .ln-block:focus-within:not(:has(.ln-block:focus-within)) > .ln-block-actions { max-height:6rem; opacity:1; overflow:visible; pointer-events:auto; margin-top:8px; }
 .ln-block-actions button { font-size:11px; padding:3px 7px; min-height:28px; color:var(--ui-text-secondary, #888); }
 .ln-children { padding-left:16px; margin-left:2px; border-left:1px solid var(--ui-border, #8883); }
 .logseq-notes .ln-ref { color:var(--ui-accent, #7562ce); padding:0; border:0; min-height:0; display:inline; }
