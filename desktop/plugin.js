@@ -347,9 +347,25 @@ function Notes({ ctx, model, scope, compact }) {
 
   const visiblePage = page?.title === title ? page : null;
   const canAppend = title && (!/^\d{4}_\d{2}_\d{2}$/.test(title) || title === info?.today);
-  const allTitles = [...new Set(pages.map(p => p['page/title'] || p.title).filter(Boolean))].sort((a, b) => b.localeCompare(a));
+  // List only pages backed by a real file: [[references]] and #tags with no page
+  // of their own ("ghost refs") stay out, matching the web viewer's sidebar.
+  const titleOf = page => page['page/title'] || page.title || '';
+  const isJournalTitle = name => /^\d{4}_\d{2}_\d{2}$/.test(name);
+  const isSystemPage = name => /^\d{4}-\d{2}-\d{2} - /.test(name);
+  const mtimeOf = page => page['page/mtime'] || 0;
+  const realPages = pages.filter(page => titleOf(page) && page['page/file']);
+  const allTitles = realPages.map(titleOf).sort((a, b) => a.localeCompare(b));
+  const recentTitles = realPages
+    .filter(page => !isJournalTitle(titleOf(page)) && !isSystemPage(titleOf(page)) && mtimeOf(page))
+    .sort((a, b) => mtimeOf(b) - mtimeOf(a))
+    .slice(0, 8)
+    .map(titleOf);
+  const browseTitles = allTitles.filter(name => !isJournalTitle(name) && !isSystemPage(name));
   const found = new Set(matches.map(match => match.page));
-  const filtered = allTitles.filter(name => name.toLowerCase().includes(query.toLowerCase()) || found.has(name));
+  const queryText = query.trim().toLowerCase();
+  const filtered = allTitles.filter(name => name.toLowerCase().includes(queryText) || found.has(name));
+  const pageButton = name => h('button', { key: name, disabled: busy,
+    className: name === title ? 'ln-page-active' : '', onClick: () => openPage(name) }, prettyTitle(name));
   const renderEditor = props => h(InlineEditor, { ...props, busy, error: writeError, save: () => save('block') });
   const matchingBlocks = editor && visiblePage ? visiblePage.blocks.filter(block => block['block/content'] === editor.expected_content && (block['block/level'] || 0) === editor.block_level) : [];
   const rebase = () => {
@@ -377,8 +393,15 @@ function Notes({ ctx, model, scope, compact }) {
         h('form', { className: 'ln-new-page', onSubmit: e => { e.preventDefault(); if (newTitle.trim()) { openPage(newTitle.trim()); setNewTitle(''); } } },
           h('input', { 'aria-label': 'New page title', placeholder: 'New page title…', maxLength: 512, value: newTitle, onChange: e => setNewTitle(e.target.value) }),
           h('button', { disabled: !newTitle.trim() || busy }, '+ New page')),
-        h('div', { className: 'ln-page-list' }, filtered.map(name => h('button', { key: name, disabled: busy,
-          className: name === title ? 'ln-page-active' : '', onClick: () => openPage(name) }, prettyTitle(name)))),
+        h('div', { className: 'ln-page-list' },
+          query ? filtered.map(pageButton) : [
+            recentTitles.length > 0 && h('div', { key: 'recent', className: 'ln-group' },
+              h('div', { className: 'ln-group-label' }, 'Recent'),
+              recentTitles.map(pageButton)),
+            h('div', { key: 'all', className: 'ln-group' },
+              h('div', { className: 'ln-group-label' }, 'All pages'),
+              browseTitles.length === 0 ? h('p', { className: 'ln-empty' }, 'No pages yet') : browseTitles.map(pageButton)),
+          ]),
         query && h('small', null, 'Content search covers pages. Open journals by date.')),
       h('div', { className: 'ln-document' },
         h('div', { className: 'ln-scroll', ref: scrollRef },
@@ -476,6 +499,9 @@ const STYLES = `
 .ln-page-list { display:flex; flex-direction:column; gap:4px; }
 .ln-page-list button { text-align:left; border-color:transparent; overflow-wrap:anywhere; }
 .ln-page-list .ln-page-active { background:var(--ui-bg-hover, #8882); border-color:var(--ui-border, #8883); }
+.ln-group { display:flex; flex-direction:column; gap:4px; }
+.ln-group + .ln-group { margin-top:14px; }
+.ln-group-label { font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.06em; color:var(--ui-text-secondary, #888); padding:2px 0; }
 .ln-document { flex:1; display:flex; flex-direction:column; min-width:0; min-height:0; }
 .ln-scroll { flex:1; overflow:auto; padding:20px 24px; overflow-anchor:none; }
 .ln-scroll h2 { margin:0 0 4px; font-size:24px; letter-spacing:-.03em; }

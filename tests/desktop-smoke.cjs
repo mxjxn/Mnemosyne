@@ -68,9 +68,15 @@ async function main() {
     } else if (route === '/status') data = { connected: true, today, graph_id: connection };
     else if (route === '/proposals') data = { proposals: [...proposals.values()] };
     else if (route.startsWith('/proposals/')) data = proposals.get(segments[1]) || {};
-    else if (route === '/pages') data = { pages: [{ 'page/title': today }, { 'page/title': 'Projects' }] };
+    else if (route === '/pages') data = { pages: [
+      { 'page/title': today, 'page/file': '/g/journals/' + today + '.md', 'page/mtime': Date.now() },
+      { 'page/title': 'Projects', 'page/file': '/g/pages/Projects.md', 'page/mtime': Date.now() - 3600e3 },
+      { 'page/title': 'Zebra Ideas', 'page/file': '/g/pages/Zebra Ideas.md', 'page/mtime': Date.now() - 7200e3 },
+      { 'page/title': 'Aardvark Notes', 'page/file': '/g/pages/Aardvark Notes.md', 'page/mtime': Date.now() - 3 * 86400e3 },
+      { 'page/title': 'ghostref' },
+    ] };
     else if (route === '/page') data = makePage();
-    else if (route === '/search') data = { results: [] };
+    else if (route === '/search') data = (url.searchParams.get('q') || '').toLowerCase().includes('ghost') ? { results: [{ page: 'ghostref', snippet: 'a matching block' }] } : { results: [] };
     res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data));
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -91,6 +97,27 @@ async function main() {
     await workspace.getByLabel('Expand writing area').click();
     assert.equal(await workspace.getByLabel('Journal entry').inputValue(), 'A draft shared between views');
     await workspace.getByLabel('Reduce writing area').click();
+
+    // The workspace browser is open by default: Recent by mtime on top, then
+    // All pages A→Z. Ghost [[references]] stay out even when search matches.
+    const browserNav = workspace.getByLabel('Notes pages');
+    await browserNav.getByText('ghostref', { exact: true }).waitFor({ state: 'detached' });
+    assert.deepEqual(await browserNav.locator('.ln-group-label').allTextContents(), ['Recent', 'All pages']);
+    assert.deepEqual(await browserNav.locator('.ln-group:has(.ln-group-label:text-is("Recent")) button').allTextContents(),
+      ['Projects', 'Zebra Ideas', 'Aardvark Notes']);
+    assert.deepEqual(await browserNav.locator('.ln-group:has(.ln-group-label:text-is("All pages")) button').allTextContents(),
+      ['Aardvark Notes', 'Projects', 'Zebra Ideas']);
+    await browserNav.getByLabel('Find a page').fill('ghostref');
+    await browserNav.getByText('ghostref', { exact: true }).waitFor({ state: 'detached' }); // even a content-match ghost stays hidden
+    await browserNav.getByLabel('Find a page').fill('');
+
+    // The compact pane starts with the browser closed; Pages toggles it.
+    const paneNav = pane.getByLabel('Notes pages');
+    assert.equal(await paneNav.locator('.ln-group-label').count(), 0);
+    await pane.getByRole('button', { name: 'Pages', exact: true }).click();
+    await paneNav.locator('.ln-group-label').first().waitFor();
+    await pane.getByRole('button', { name: 'Pages', exact: true }).click();
+    await paneNav.waitFor({ state: 'detached' });
 
     await page.evaluate(() => window.harness.switchGateway());
     await workspace.getByText('A different private graph', { exact: true }).waitFor();
