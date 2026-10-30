@@ -1,4 +1,4 @@
-# Mnemosyne
+# Hermes-Logseq
 
 **Capture, connect, discuss, and publish—with your agent.**
 
